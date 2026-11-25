@@ -1,0 +1,8 @@
+{
+  "name": "Jean Auto vsp ",
+  "description": "Backoffice administrateur complet style WordPress connecté à la base de données Firebase.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
