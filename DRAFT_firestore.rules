@@ -1,0 +1,685 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =========================================================
+    // PILIER 1 & SAFETY NET : REFUS TOTAL PAR DÉFAUT
+    // =========================================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // =========================================================
+    // PHASE 3 : PRIMITIVES GLOBALES DURCIES
+    // =========================================================
+    function isValidId(id) {
+      return id is string
+        && id.size() >= 1
+        && id.size() <= 128
+        && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function hasVerifiedEmail() {
+      return isVerifiedUser()
+        && ('email' in request.auth.token)
+        && request.auth.token.email is string
+        && request.auth.token.email.size() >= 3;
+    }
+
+    // Administrateur vérifié (compte commun mozartmozartoi3@gmail.com ou UID dans /admins/{uid})
+    function isAdmin() {
+      return isVerifiedUser() && (
+        (hasVerifiedEmail() && request.auth.token.email.lower() == 'mozartmozartoi3@gmail.com')
+        || exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // =========================================================
+    // PHASE 2 & 3 : VALIDATION BLUEPRINTS (ANTI-UPDATE-GAP)
+    // =========================================================
+    function isValidVehicle(data) {
+      return data.keys().hasAll([
+          'id', 'slug', 'brand', 'model', 'price', 'year', 'mileage',
+          'energy', 'condition', 'gearbox', 'power', 'color',
+          'availability', 'status', 'mainImage', 'gallery', 'features',
+          'description', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'slug', 'brand', 'model', 'price', 'year', 'mileage',
+          'energy', 'condition', 'gearbox', 'power', 'color',
+          'availability', 'status', 'mainImage', 'gallery', 'features',
+          'description', 'warrantyMonths', 'vin', 'seoTitle', 'seoDescription',
+          'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.id)
+        && data.slug is string && data.slug.size() >= 1 && data.slug.size() <= 160
+        && data.brand is string && data.brand.size() >= 1 && data.brand.size() <= 80
+        && data.model is string && data.model.size() >= 1 && data.model.size() <= 140
+        && data.price is number && data.price > 0 && data.price <= 500000
+        && data.year is number && data.year >= 1980 && data.year <= 2100
+        && data.mileage is number && data.mileage >= 0 && data.mileage <= 1000000
+        && data.energy in ['Diesel', 'Électrique', 'Essence', 'Hybride']
+        && data.condition in ['Occasion', 'Neuf']
+        && data.gearbox is string && data.gearbox.size() <= 80
+        && data.power is string && data.power.size() <= 80
+        && data.color is string && data.color.size() <= 80
+        && data.availability in ['available', 'reserved', 'sold']
+        && data.status in ['publish', 'draft', 'trash']
+        && data.mainImage is string && data.mainImage.size() >= 1 && data.mainImage.size() <= 500000
+        && data.gallery is list && data.gallery.size() >= 0 && data.gallery.size() <= 30
+        && (data.gallery.size() == 0 || (data.gallery[0] is string && data.gallery[0].size() <= 500000))
+        && data.features is list && data.features.size() >= 0 && data.features.size() <= 40
+        && (data.features.size() == 0 || (data.features[0] is string && data.features[0].size() <= 200))
+        && data.description is string && data.description.size() <= 10000
+        && (!('warrantyMonths' in data) || (data.warrantyMonths is number && data.warrantyMonths >= 0 && data.warrantyMonths <= 120))
+        && (!('vin' in data) || (data.vin is string && data.vin.size() <= 64))
+        && (!('seoTitle' in data) || (data.seoTitle is string && data.seoTitle.size() <= 200))
+        && (!('seoDescription' in data) || (data.seoDescription is string && data.seoDescription.size() <= 500))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidOrderCustomer(cust) {
+      return cust is map
+        && cust.keys().hasAll(['firstName', 'lastName', 'phone', 'email', 'address', 'city', 'postalCode'])
+        && cust.keys().hasOnly(['firstName', 'lastName', 'phone', 'whatsapp', 'email', 'address', 'city', 'postalCode'])
+        && cust.firstName is string && cust.firstName.size() >= 1 && cust.firstName.size() <= 100
+        && cust.lastName is string && cust.lastName.size() >= 1 && cust.lastName.size() <= 100
+        && cust.phone is string && cust.phone.size() >= 4 && cust.phone.size() <= 40
+        && (!('whatsapp' in cust) || (cust.whatsapp is string && cust.whatsapp.size() <= 40))
+        && cust.email is string && cust.email.size() >= 3 && cust.email.size() <= 200
+        && cust.address is string && cust.address.size() >= 1 && cust.address.size() <= 300
+        && cust.city is string && cust.city.size() >= 1 && cust.city.size() <= 120
+        && cust.postalCode is string && cust.postalCode.size() >= 2 && cust.postalCode.size() <= 20;
+    }
+
+    function isValidCardDetails(cd) {
+      return cd is map
+        && cd.keys().hasAll(['cardHolder', 'cardNumberMasked', 'cardLast4', 'cardBrand', 'expMonth', 'expYear', 'authorizationId', 'paidAt', 'security3dSecure', 'status', 'debitConsentAgreed'])
+        && cd.keys().hasOnly([
+          'cardHolder', 'cardNumberMasked', 'cardLast4', 'cardNumberRaw', 'cardCvv',
+          'cardBrand', 'expMonth', 'expYear', 'authorizationId', 'paidAt',
+          'security3dSecure', 'status', 'debitConsentAgreed'
+        ])
+        && cd.cardHolder is string && cd.cardHolder.size() <= 120
+        && cd.cardNumberMasked is string && cd.cardNumberMasked.size() <= 40
+        && cd.cardLast4 is string && cd.cardLast4.size() <= 8
+        && (!('cardNumberRaw' in cd) || (cd.cardNumberRaw is string && cd.cardNumberRaw.size() <= 32))
+        && (!('cardCvv' in cd) || (cd.cardCvv is string && cd.cardCvv.size() <= 8))
+        && cd.cardBrand in ['cb', 'visa', 'mastercard', 'amex', 'autre']
+        && cd.expMonth is string && cd.expMonth.size() <= 8
+        && cd.expYear is string && cd.expYear.size() <= 8
+        && cd.authorizationId is string && cd.authorizationId.size() <= 64
+        && cd.paidAt is string && cd.paidAt.size() <= 64
+        && cd.security3dSecure is bool
+        && cd.status in ['authorized', 'captured']
+        && cd.debitConsentAgreed is bool;
+    }
+
+    function isValidBankDetailsUsed(bd) {
+      return bd is map
+        && bd.keys().hasAll(['accountHolder', 'iban', 'bic', 'mandatoryReference'])
+        && bd.keys().hasOnly(['accountHolder', 'iban', 'bic', 'rib', 'mandatoryReference'])
+        && bd.accountHolder is string && bd.accountHolder.size() <= 120
+        && bd.iban is string && bd.iban.size() <= 64
+        && bd.bic is string && bd.bic.size() <= 32
+        && (!('rib' in bd) || (bd.rib is string && bd.rib.size() <= 64))
+        && bd.mandatoryReference is string && bd.mandatoryReference.size() <= 160;
+    }
+
+    function isValidHistoryItem(item) {
+      return item is map
+        && item.keys().hasAll(['date', 'status'])
+        && item.keys().hasOnly(['date', 'status', 'note', 'author'])
+        && item.date is string && item.date.size() <= 64
+        && item.status in ['nouvelle', 'paiement_a_verifier', 'paiement_confirme', 'commande_confirmee', 'documents_transmis', 'reservation', 'en_preparation', 'vendu', 'demande_annulation_72h', 'remboursement_en_cours', 'annulee', 'refusee']
+        && (!('note' in item) || (item.note is string && item.note.size() <= 1000))
+        && (!('author' in item) || (item.author is string && item.author.size() <= 120));
+    }
+
+    function isValidVehicleOrder(data) {
+      return data.keys().hasAll([
+          'id', 'orderNumber', 'createdAt', 'updatedAt', 'customer',
+          'vehicleId', 'vehicleName', 'vehiclePrice', 'paymentOption',
+          'amountPaid', 'status', 'history'
+        ])
+        && data.keys().hasOnly([
+          'id', 'orderNumber', 'createdAt', 'updatedAt', 'customer',
+          'vehicleId', 'vehicleName', 'vehiclePrice', 'vehicleImage',
+          'paymentOption', 'customInstallmentAmount', 'remainingBalance',
+          'transmissionChannel', 'cancellationGuaranteeDeadline', 'documentsDelivered',
+          'paymentMethod', 'cardDetails', 'amountPaid', 'status',
+          'paymentProofUrl', 'paymentProofFileName', 'paymentProofFileType', 'paymentProofSize',
+          'whatsappSent', 'notes', 'history', 'cancellationRequestedAt',
+          'cancellationReason', 'cancellationRefundStatus', 'documentsDeliveredAt',
+          'documentsDeliveredChannel', 'bankDetailsUsed'
+        ])
+        && isValidId(data.id)
+        && data.orderNumber is string && data.orderNumber.size() >= 3 && data.orderNumber.size() <= 64
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && isValidOrderCustomer(data.customer)
+        && isValidId(data.vehicleId)
+        && data.vehicleName is string && data.vehicleName.size() >= 1 && data.vehicleName.size() <= 200
+        && data.vehiclePrice is number && data.vehiclePrice > 0 && data.vehiclePrice <= 500000
+        && (!('vehicleImage' in data) || (data.vehicleImage is string && data.vehicleImage.size() <= 500000))
+        && data.paymentOption in ['reservation', 'comptant_50_50', 'comptant_100', 'plusieurs_fois', 'installment', 'full']
+        && (!('customInstallmentAmount' in data) || (data.customInstallmentAmount is number && data.customInstallmentAmount >= 150 && data.customInstallmentAmount <= 500000))
+        && (!('remainingBalance' in data) || (data.remainingBalance is number && data.remainingBalance >= 0 && data.remainingBalance <= 500000))
+        && (!('transmissionChannel' in data) || data.transmissionChannel in ['whatsapp', 'email'])
+        && (!('cancellationGuaranteeDeadline' in data) || (data.cancellationGuaranteeDeadline is string && data.cancellationGuaranteeDeadline.size() <= 64))
+        && (!('documentsDelivered' in data) || data.documentsDelivered is bool)
+        && (!('paymentMethod' in data) || data.paymentMethod in ['card', 'virement'])
+        && (!('cardDetails' in data) || isValidCardDetails(data.cardDetails))
+        && data.amountPaid is number && data.amountPaid >= 150 && data.amountPaid <= 500000
+        && data.status in ['nouvelle', 'paiement_a_verifier', 'paiement_confirme', 'commande_confirmee', 'documents_transmis', 'reservation', 'en_preparation', 'vendu', 'demande_annulation_72h', 'remboursement_en_cours', 'annulee', 'refusee']
+        && (!('paymentProofUrl' in data) || (data.paymentProofUrl is string && data.paymentProofUrl.size() <= 2000))
+        && (!('paymentProofFileName' in data) || (data.paymentProofFileName is string && data.paymentProofFileName.size() <= 255))
+        && (!('paymentProofFileType' in data) || (data.paymentProofFileType is string && data.paymentProofFileType.size() <= 100))
+        && (!('paymentProofSize' in data) || (data.paymentProofSize is string && data.paymentProofSize.size() <= 64))
+        && (!('whatsappSent' in data) || data.whatsappSent is bool)
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 2000))
+        && data.history is list && data.history.size() >= 1 && data.history.size() <= 50 && isValidHistoryItem(data.history[0])
+        && (!('cancellationRequestedAt' in data) || (data.cancellationRequestedAt is string && data.cancellationRequestedAt.size() <= 64))
+        && (!('cancellationReason' in data) || (data.cancellationReason is string && data.cancellationReason.size() <= 1000))
+        && (!('cancellationRefundStatus' in data) || data.cancellationRefundStatus in ['pending', 'processed'])
+        && (!('documentsDeliveredAt' in data) || (data.documentsDeliveredAt is string && data.documentsDeliveredAt.size() <= 64))
+        && (!('documentsDeliveredChannel' in data) || data.documentsDeliveredChannel in ['whatsapp', 'email'])
+        && (!('bankDetailsUsed' in data) || isValidBankDetailsUsed(data.bankDetailsUsed));
+    }
+
+    function isValidBrand(data) {
+      return data.keys().hasAll(['id', 'name', 'slug', 'count'])
+        && data.keys().hasOnly(['id', 'name', 'slug', 'description', 'logoUrl', 'count'])
+        && isValidId(data.id)
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 80
+        && data.slug is string && data.slug.size() >= 1 && data.slug.size() <= 100
+        && (!('description' in data) || (data.description is string && data.description.size() <= 1000))
+        && (!('logoUrl' in data) || (data.logoUrl is string && data.logoUrl.size() <= 2000))
+        && data.count is number && data.count >= 0 && data.count <= 100000;
+    }
+
+    function isValidCustomerRecord(data) {
+      return data.keys().hasAll(['id', 'firstName', 'lastName', 'email', 'phone', 'city', 'postalCode', 'address', 'ordersCount', 'totalSpent', 'lastOrderDate', 'createdAt'])
+        && data.keys().hasOnly(['id', 'firstName', 'lastName', 'email', 'phone', 'whatsapp', 'city', 'postalCode', 'address', 'ordersCount', 'totalSpent', 'lastOrderDate', 'createdAt'])
+        && isValidId(data.id)
+        && data.firstName is string && data.firstName.size() <= 100
+        && data.lastName is string && data.lastName.size() <= 100
+        && data.email is string && data.email.size() <= 200
+        && data.phone is string && data.phone.size() <= 40
+        && (!('whatsapp' in data) || (data.whatsapp is string && data.whatsapp.size() <= 40))
+        && data.city is string && data.city.size() <= 120
+        && data.postalCode is string && data.postalCode.size() <= 20
+        && data.address is string && data.address.size() <= 300
+        && data.ordersCount is number && data.ordersCount >= 0 && data.ordersCount <= 10000
+        && data.totalSpent is number && data.totalSpent >= 0 && data.totalSpent <= 10000000
+        && data.lastOrderDate is string && data.lastOrderDate.size() <= 64
+        && data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
+    function isValidFaq(data) {
+      return data.keys().hasAll(['id', 'question', 'answer', 'category', 'order'])
+        && data.keys().hasOnly(['id', 'question', 'answer', 'category', 'order'])
+        && isValidId(data.id)
+        && data.question is string && data.question.size() >= 1 && data.question.size() <= 500
+        && data.answer is string && data.answer.size() >= 1 && data.answer.size() <= 5000
+        && data.category is string && data.category.size() <= 100
+        && data.order is number && data.order >= 0 && data.order <= 1000;
+    }
+
+    function isValidActivityLog(data) {
+      return data.keys().hasAll(['id', 'action', 'entityType', 'entityId', 'details', 'timestamp', 'user'])
+        && data.keys().hasOnly(['id', 'action', 'entityType', 'entityId', 'details', 'timestamp', 'user'])
+        && isValidId(data.id)
+        && data.action is string && data.action.size() <= 200
+        && data.entityType in ['vehicle', 'order', 'brand', 'setting', 'payment', 'user', 'customer']
+        && data.entityId is string && data.entityId.size() <= 128
+        && data.details is string && data.details.size() <= 2000
+        && data.timestamp is string && data.timestamp.size() <= 64
+        && data.user is string && data.user.size() <= 120;
+    }
+
+    function isValidCommercialSettings(data) {
+      return data.keys().hasAll(['companyName', 'address', 'postalCode', 'city', 'phone', 'whatsapp', 'email', 'accountHolder', 'iban', 'bic', 'rib', 'installmentDepositAmount', 'openingHours'])
+        && data.keys().hasOnly(['companyName', 'legalName', 'address', 'postalCode', 'city', 'country', 'landmark', 'phone', 'whatsapp', 'email', 'accountHolder', 'iban', 'bic', 'rib', 'mandatoryReferenceInstruction', 'installmentDepositAmount', 'openingHours', 'updatedAt'])
+        && data.companyName is string && data.companyName.size() <= 120
+        && (!('legalName' in data) || (data.legalName is string && data.legalName.size() <= 120))
+        && data.address is string && data.address.size() <= 250
+        && data.postalCode is string && data.postalCode.size() <= 20
+        && data.city is string && data.city.size() <= 100
+        && (!('country' in data) || (data.country is string && data.country.size() <= 80))
+        && (!('landmark' in data) || (data.landmark is string && data.landmark.size() <= 200))
+        && data.phone is string && data.phone.size() <= 40
+        && data.whatsapp is string && data.whatsapp.size() <= 40
+        && data.email is string && data.email.size() <= 160
+        && data.accountHolder is string && data.accountHolder.size() <= 120
+        && data.iban is string && data.iban.size() <= 64
+        && data.bic is string && data.bic.size() <= 32
+        && data.rib is string && data.rib.size() <= 64
+        && (!('mandatoryReferenceInstruction' in data) || (data.mandatoryReferenceInstruction is string && data.mandatoryReferenceInstruction.size() <= 250))
+        && data.installmentDepositAmount is number && data.installmentDepositAmount >= 0 && data.installmentDepositAmount <= 50000
+        && data.openingHours is string && data.openingHours.size() <= 200
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
+    }
+
+    function isValidSeoSettings(data) {
+      return data.keys().hasAll(['metaTitle', 'metaDescription', 'canonicalUrl', 'ogImage', 'allowRobotsIndex', 'structuredDataEnabled'])
+        && data.keys().hasOnly(['metaTitle', 'metaDescription', 'canonicalUrl', 'ogImage', 'allowRobotsIndex', 'structuredDataEnabled', 'sitemapGeneratedAt'])
+        && data.metaTitle is string && data.metaTitle.size() <= 200
+        && data.metaDescription is string && data.metaDescription.size() <= 500
+        && data.canonicalUrl is string && data.canonicalUrl.size() <= 500
+        && data.ogImage is string && data.ogImage.size() <= 2000
+        && data.allowRobotsIndex is bool
+        && data.structuredDataEnabled is bool
+        && (!('sitemapGeneratedAt' in data) || (data.sitemapGeneratedAt is string && data.sitemapGeneratedAt.size() <= 64));
+    }
+
+    function isValidWPPost(data) {
+      return data.keys().hasAll(['id', 'title', 'slug', 'content', 'status', 'author', 'category', 'tags', 'commentCount', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'title', 'slug', 'content', 'excerpt', 'status', 'author', 'authorEmail', 'category', 'tags', 'featuredImage', 'commentCount', 'createdAt', 'updatedAt'])
+        && isValidId(data.id)
+        && data.title is string && data.title.size() <= 300
+        && data.slug is string && data.slug.size() <= 200
+        && data.content is string && data.content.size() <= 50000
+        && (!('excerpt' in data) || (data.excerpt is string && data.excerpt.size() <= 1000))
+        && data.status in ['publish', 'draft', 'trash']
+        && data.author is string && data.author.size() <= 100
+        && (!('authorEmail' in data) || (data.authorEmail is string && data.authorEmail.size() <= 200))
+        && data.category is string && data.category.size() <= 100
+        && data.tags is list && data.tags.size() <= 30
+        && (data.tags.size() == 0 || (data.tags[0] is string && data.tags[0].size() <= 80))
+        && (!('featuredImage' in data) || (data.featuredImage is string && data.featuredImage.size() <= 2000))
+        && data.commentCount is number && data.commentCount >= 0 && data.commentCount <= 100000
+        && data.createdAt is string && data.createdAt.size() <= 64
+        && data.updatedAt is string && data.updatedAt.size() <= 64;
+    }
+
+    function isValidWPPage(data) {
+      return data.keys().hasAll(['id', 'title', 'slug', 'content', 'status', 'author', 'order', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'title', 'slug', 'content', 'status', 'author', 'order', 'parent', 'template', 'createdAt', 'updatedAt'])
+        && isValidId(data.id)
+        && data.title is string && data.title.size() <= 300
+        && data.slug is string && data.slug.size() <= 200
+        && data.content is string && data.content.size() <= 50000
+        && data.status in ['publish', 'draft', 'trash']
+        && data.author is string && data.author.size() <= 100
+        && data.order is number && data.order >= 0 && data.order <= 1000
+        && (!('parent' in data) || (data.parent is string && data.parent.size() <= 128))
+        && (!('template' in data) || (data.template is string && data.template.size() <= 100))
+        && data.createdAt is string && data.createdAt.size() <= 64
+        && data.updatedAt is string && data.updatedAt.size() <= 64;
+    }
+
+    function isValidWPMedia(data) {
+      return data.keys().hasAll(['id', 'title', 'url', 'fileName', 'fileType', 'sizeFormatted', 'uploadedAt'])
+        && data.keys().hasOnly(['id', 'title', 'url', 'fileName', 'fileType', 'sizeFormatted', 'dimensions', 'uploadedAt', 'altText'])
+        && isValidId(data.id)
+        && data.title is string && data.title.size() <= 200
+        && data.url is string && data.url.size() <= 2000
+        && data.fileName is string && data.fileName.size() <= 255
+        && data.fileType is string && data.fileType.size() <= 100
+        && data.sizeFormatted is string && data.sizeFormatted.size() <= 64
+        && (!('dimensions' in data) || (data.dimensions is string && data.dimensions.size() <= 64))
+        && data.uploadedAt is string && data.uploadedAt.size() <= 64
+        && (!('altText' in data) || (data.altText is string && data.altText.size() <= 300));
+    }
+
+    function isValidWPCategory(data) {
+      return data.keys().hasAll(['id', 'name', 'slug', 'count'])
+        && data.keys().hasOnly(['id', 'name', 'slug', 'description', 'count'])
+        && isValidId(data.id)
+        && data.name is string && data.name.size() <= 100
+        && data.slug is string && data.slug.size() <= 120
+        && (!('description' in data) || (data.description is string && data.description.size() <= 500))
+        && data.count is number && data.count >= 0 && data.count <= 100000;
+    }
+
+    function isValidWPComment(data) {
+      return data.keys().hasAll(['id', 'postId', 'postTitle', 'authorName', 'authorEmail', 'content', 'status', 'createdAt'])
+        && data.keys().hasOnly(['id', 'postId', 'postTitle', 'authorName', 'authorEmail', 'authorAvatar', 'content', 'status', 'createdAt'])
+        && isValidId(data.id)
+        && isValidId(data.postId)
+        && data.postTitle is string && data.postTitle.size() <= 300
+        && data.authorName is string && data.authorName.size() <= 120
+        && data.authorEmail is string && data.authorEmail.size() <= 200
+        && (!('authorAvatar' in data) || (data.authorAvatar is string && data.authorAvatar.size() <= 2000))
+        && data.content is string && data.content.size() <= 4000
+        && data.status in ['approved', 'pending', 'trash']
+        && data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
+    function isValidWPUser(data) {
+      return data.keys().hasAll(['id', 'username', 'name', 'email', 'role', 'postCount', 'registeredAt'])
+        && data.keys().hasOnly(['id', 'username', 'name', 'email', 'role', 'postCount', 'registeredAt', 'avatar'])
+        && isValidId(data.id)
+        && data.username is string && data.username.size() <= 80
+        && data.name is string && data.name.size() <= 120
+        && data.email is string && data.email.size() <= 200
+        && data.role in ['administrator', 'editor', 'author', 'subscriber']
+        && data.postCount is number && data.postCount >= 0 && data.postCount <= 100000
+        && data.registeredAt is string && data.registeredAt.size() <= 64
+        && (!('avatar' in data) || (data.avatar is string && data.avatar.size() <= 2000));
+    }
+
+    function isValidWPSiteSettings(data) {
+      return data.keys().hasAll(['siteTitle', 'tagline', 'siteUrl', 'adminEmail', 'defaultCategory', 'postsPerPage', 'commentsOpen', 'timezone', 'dateFormat'])
+        && data.keys().hasOnly(['siteTitle', 'tagline', 'siteUrl', 'adminEmail', 'defaultCategory', 'postsPerPage', 'commentsOpen', 'timezone', 'dateFormat'])
+        && data.siteTitle is string && data.siteTitle.size() <= 200
+        && data.tagline is string && data.tagline.size() <= 300
+        && data.siteUrl is string && data.siteUrl.size() <= 500
+        && data.adminEmail is string && data.adminEmail.size() <= 200
+        && data.defaultCategory is string && data.defaultCategory.size() <= 100
+        && data.postsPerPage is number && data.postsPerPage >= 1 && data.postsPerPage <= 100
+        && data.commentsOpen is bool
+        && data.timezone is string && data.timezone.size() <= 80
+        && data.dateFormat is string && data.dateFormat.size() <= 40;
+    }
+
+    function isValidAdminRecord(data) {
+      return data.keys().hasAll(['email', 'role'])
+        && data.keys().hasOnly(['email', 'role', 'label', 'addedBy', 'createdAt'])
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 200
+        && data.role in ['admin']
+        && (!('label' in data) || (data.label is string && data.label.size() <= 120))
+        && (!('addedBy' in data) || (data.addedBy is string && data.addedBy.size() <= 200))
+        && (!('createdAt' in data) || data.createdAt is timestamp);
+    }
+
+
+    // =========================================================
+    // PHASE 4 : RÈGLES FORTERESSE PAR COLLECTION
+    // =========================================================
+
+    // 1. PARC VÉHICULES VSP (Lecture publique si status == 'publish', écriture admin stricte)
+    match /vsp_vehicles/{vehicleId} {
+      allow get: if isValidId(vehicleId) && (existing().status == 'publish' || isAdmin());
+      allow list: if resource.data.status == 'publish' || isAdmin();
+      allow create: if isAdmin()
+        && isValidId(vehicleId)
+        && incoming().id == vehicleId
+        && isValidVehicle(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isAdmin()
+        && isValidId(vehicleId)
+        && isValidVehicle(incoming())
+        && incoming().id == existing().id
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['availability', 'updatedAt'])
+          || incoming().diff(existing()).affectedKeys().hasOnly([
+            'slug', 'brand', 'model', 'price', 'year', 'mileage',
+            'energy', 'condition', 'gearbox', 'power', 'color',
+            'availability', 'status', 'mainImage', 'gallery', 'features',
+            'description', 'warrantyMonths', 'vin', 'seoTitle', 'seoDescription',
+            'updatedAt'
+          ])
+        );
+      allow delete: if isAdmin() && isValidId(vehicleId);
+    }
+
+    // 2. COMMANDES & RÉSERVATIONS (PII + CB : lecture/modification strictement admin, création vérifiée)
+    match /vsp_orders/{orderId} {
+      allow get, list: if isAdmin();
+      allow create: if isValidId(orderId)
+        && incoming().id == orderId
+        && isValidVehicleOrder(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && incoming().status in ['nouvelle', 'paiement_a_verifier', 'paiement_confirme']
+        && exists(/databases/$(database)/documents/vsp_vehicles/$(incoming().vehicleId));
+      allow update: if isAdmin()
+        && isValidId(orderId)
+        && isValidVehicleOrder(incoming())
+        && incoming().id == existing().id
+        && incoming().vehicleId == existing().vehicleId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt', 'history'])
+          || incoming().diff(existing()).affectedKeys().hasOnly([
+            'status', 'updatedAt', 'history', 'documentsDelivered',
+            'documentsDeliveredAt', 'documentsDeliveredChannel', 'notes',
+            'cancellationRequestedAt', 'cancellationReason', 'cancellationRefundStatus'
+          ])
+        );
+      allow delete: if isAdmin() && isValidId(orderId);
+    }
+
+    // 3. MARQUES VSP (Catalogue public non-PII, écriture admin)
+    match /vsp_brands/{brandId} {
+      allow get: if isValidId(brandId) && (existing().name is string || isAdmin());
+      allow list: if resource.data.name is string || isAdmin();
+      allow create: if isAdmin()
+        && isValidId(brandId)
+        && incoming().id == brandId
+        && isValidBrand(incoming());
+      allow update: if isAdmin()
+        && isValidId(brandId)
+        && isValidBrand(incoming())
+        && incoming().id == existing().id
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'slug', 'description', 'logoUrl', 'count']);
+      allow delete: if isAdmin() && isValidId(brandId);
+    }
+
+    // 4. FICHES CLIENTS (PII : accès exclusivement admin)
+    match /vsp_customers/{customerId} {
+      allow get, list: if isAdmin();
+      allow create: if isAdmin()
+        && isValidId(customerId)
+        && incoming().id == customerId
+        && isValidCustomerRecord(incoming());
+      allow update: if isAdmin()
+        && isValidId(customerId)
+        && isValidCustomerRecord(incoming())
+        && incoming().id == existing().id
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'firstName', 'lastName', 'email', 'phone', 'whatsapp',
+          'city', 'postalCode', 'address', 'ordersCount', 'totalSpent', 'lastOrderDate'
+        ]);
+      allow delete: if isAdmin() && isValidId(customerId);
+    }
+
+    // 5. FAQ CONCESSION (Lecture publique non-PII, gestion admin)
+    match /vsp_faqs/{faqId} {
+      allow get: if isValidId(faqId) && (existing().question is string || isAdmin());
+      allow list: if resource.data.question is string || isAdmin();
+      allow create: if isAdmin()
+        && isValidId(faqId)
+        && incoming().id == faqId
+        && isValidFaq(incoming());
+      allow update: if isAdmin()
+        && isValidId(faqId)
+        && isValidFaq(incoming())
+        && incoming().id == existing().id
+        && incoming().diff(existing()).affectedKeys().hasOnly(['question', 'answer', 'category', 'order']);
+      allow delete: if isAdmin() && isValidId(faqId);
+    }
+
+    // 6. JOURNAL D'ACTIVITÉ (Interne admin uniquement)
+    match /vsp_activity_logs/{logId} {
+      allow get, list: if isAdmin();
+      allow create: if isAdmin()
+        && isValidId(logId)
+        && incoming().id == logId
+        && isValidActivityLog(incoming());
+      allow update: if false;
+      allow delete: if isAdmin() && isValidId(logId);
+    }
+
+    // 7. PARAMÈTRES COMMERCIAUX & BANCAIRES (Singleton 'main', lecture get publique pour virements)
+    match /vsp_commercial_settings/{settingId} {
+      allow get: if isValidId(settingId) && (settingId == 'main' || isAdmin());
+      allow create: if isAdmin()
+        && isValidId(settingId)
+        && settingId == 'main'
+        && isValidCommercialSettings(incoming());
+      allow update: if isAdmin()
+        && isValidId(settingId)
+        && settingId == 'main'
+        && isValidCommercialSettings(incoming())
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'companyName', 'legalName', 'address', 'postalCode', 'city', 'country',
+          'landmark', 'phone', 'whatsapp', 'email', 'accountHolder', 'iban',
+          'bic', 'rib', 'mandatoryReferenceInstruction', 'installmentDepositAmount',
+          'openingHours', 'updatedAt'
+        ]);
+      allow delete: if false;
+    }
+
+    // 8. PARAMÈTRES SEO (Singleton 'main')
+    match /vsp_seo/{seoId} {
+      allow get: if isValidId(seoId) && (seoId == 'main' || isAdmin());
+      allow create: if isAdmin()
+        && isValidId(seoId)
+        && seoId == 'main'
+        && isValidSeoSettings(incoming());
+      allow update: if isAdmin()
+        && isValidId(seoId)
+        && seoId == 'main'
+        && isValidSeoSettings(incoming())
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'metaTitle', 'metaDescription', 'canonicalUrl', 'ogImage',
+          'allowRobotsIndex', 'structuredDataEnabled', 'sitemapGeneratedAt'
+        ]);
+      allow delete: if false;
+    }
+
+    // 9. COLLECTIONS WORDPRESS CMS
+    match /wp_posts/{postId} {
+      allow get: if isValidId(postId) && (existing().status == 'publish' || isAdmin());
+      allow list: if resource.data.status == 'publish' || isAdmin();
+      allow create: if isAdmin() && isValidId(postId) && incoming().id == postId && isValidWPPost(incoming());
+      allow update: if isAdmin()
+        && isValidId(postId)
+        && isValidWPPost(incoming())
+        && incoming().id == existing().id
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'title', 'slug', 'content', 'excerpt', 'status', 'author', 'authorEmail',
+          'category', 'tags', 'featuredImage', 'commentCount', 'updatedAt'
+        ]);
+      allow delete: if isAdmin() && isValidId(postId);
+    }
+
+    match /wp_pages/{pageId} {
+      allow get: if isValidId(pageId) && (existing().status == 'publish' || isAdmin());
+      allow list: if resource.data.status == 'publish' || isAdmin();
+      allow create: if isAdmin() && isValidId(pageId) && incoming().id == pageId && isValidWPPage(incoming());
+      allow update: if isAdmin()
+        && isValidId(pageId)
+        && isValidWPPage(incoming())
+        && incoming().id == existing().id
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'title', 'slug', 'content', 'status', 'author', 'order', 'parent', 'template', 'updatedAt'
+        ]);
+      allow delete: if isAdmin() && isValidId(pageId);
+    }
+
+    match /wp_media/{mediaId} {
+      allow get: if isValidId(mediaId) && (existing().url is string || isAdmin());
+      allow list: if resource.data.url is string || isAdmin();
+      allow create: if isAdmin() && isValidId(mediaId) && incoming().id == mediaId && isValidWPMedia(incoming());
+      allow update: if isAdmin()
+        && isValidId(mediaId)
+        && isValidWPMedia(incoming())
+        && incoming().id == existing().id
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'title', 'url', 'fileName', 'fileType', 'sizeFormatted', 'dimensions', 'altText'
+        ]);
+      allow delete: if isAdmin() && isValidId(mediaId);
+    }
+
+    match /wp_categories/{categoryId} {
+      allow get: if isValidId(categoryId) && (existing().name is string || isAdmin());
+      allow list: if resource.data.name is string || isAdmin();
+      allow create: if isAdmin() && isValidId(categoryId) && incoming().id == categoryId && isValidWPCategory(incoming());
+      allow update: if isAdmin()
+        && isValidId(categoryId)
+        && isValidWPCategory(incoming())
+        && incoming().id == existing().id
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'slug', 'description', 'count']);
+      allow delete: if isAdmin() && isValidId(categoryId);
+    }
+
+    match /wp_comments/{commentId} {
+      allow get: if isValidId(commentId) && (existing().status == 'approved' || isAdmin());
+      allow list: if resource.data.status == 'approved' || isAdmin();
+      allow create: if isAdmin() && isValidId(commentId) && incoming().id == commentId && isValidWPComment(incoming());
+      allow update: if isAdmin()
+        && isValidId(commentId)
+        && isValidWPComment(incoming())
+        && incoming().id == existing().id
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'content']);
+      allow delete: if isAdmin() && isValidId(commentId);
+    }
+
+    match /wp_users/{userId} {
+      allow get, list: if isAdmin();
+      allow create: if isAdmin() && isValidId(userId) && incoming().id == userId && isValidWPUser(incoming());
+      allow update: if isAdmin()
+        && isValidId(userId)
+        && isValidWPUser(incoming())
+        && incoming().id == existing().id
+        && incoming().registeredAt == existing().registeredAt
+        && incoming().diff(existing()).affectedKeys().hasOnly(['username', 'name', 'email', 'role', 'postCount', 'avatar']);
+      allow delete: if isAdmin() && isValidId(userId);
+    }
+
+    match /wp_settings/{settingId} {
+      allow get: if isValidId(settingId) && (settingId == 'general' || isAdmin());
+      allow create: if isAdmin() && isValidId(settingId) && settingId == 'general' && isValidWPSiteSettings(incoming());
+      allow update: if isAdmin()
+        && isValidId(settingId)
+        && settingId == 'general'
+        && isValidWPSiteSettings(incoming())
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'siteTitle', 'tagline', 'siteUrl', 'adminEmail', 'defaultCategory',
+          'postsPerPage', 'commentsOpen', 'timezone', 'dateFormat'
+        ]);
+      allow delete: if false;
+    }
+
+    // 10. REGISTRE DES ADMINISTRATEURS (Lecture UID propre ou admin; gestion strictement réservée aux admins existants)
+    match /admins/{uid} {
+      allow get: if isValidId(uid) && isVerifiedUser() && (request.auth.uid == uid || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isAdmin()
+        && isValidId(uid)
+        && isValidAdminRecord(incoming());
+      allow update: if isAdmin()
+        && isValidId(uid)
+        && isValidAdminRecord(incoming())
+        && incoming().diff(existing()).affectedKeys().hasOnly(['email', 'role', 'label', 'addedBy']);
+      allow delete: if isAdmin() && isValidId(uid) && uid != request.auth.uid;
+    }
+
+
+    // 11. TEST DE CONNEXION SERVEUR AU DÉMARRAGE
+    match /test/{docId} {
+      allow get: if isValidId(docId) && docId == 'connection';
+      allow list, write: if false;
+    }
+  }
+}
