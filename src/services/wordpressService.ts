@@ -968,16 +968,19 @@ export class WordPressFirebaseService {
     const safeGallery = Array.isArray(raw?.gallery)
       ? raw.gallery
           .filter((g: any) => typeof g === 'string' && g.trim().length > 0)
-          .map((g: string) => g.slice(0, 500000))
+          .map((g: string) => g.trim().slice(0, 500000))
           .slice(0, 30)
       : [safeMain];
 
+    const safeBrand = String(raw?.brand || '').trim().slice(0, 80) || 'Aixam';
+    const safeModel = String(raw?.model || '').trim().slice(0, 140) || 'Modèle VSP';
+    const safeSlug = String(raw?.slug || '').trim().slice(0, 160) || 'vehicule-vsp';
+
     return {
-      ...raw,
       id: sanitizeSafeId(String(raw?.id || ''), 'veh'),
-      slug: String(raw?.slug || 'vehicule-vsp').slice(0, 160),
-      brand: String(raw?.brand || 'Aixam').slice(0, 80),
-      model: String(raw?.model || 'Modèle VSP').slice(0, 140),
+      slug: safeSlug,
+      brand: safeBrand,
+      model: safeModel,
       price: Math.max(1, Math.min(500000, Number(raw?.price) || 8990)),
       year: Math.max(1980, Math.min(2100, Number(raw?.year) || new Date().getFullYear())),
       mileage: Math.max(0, Math.min(1000000, Number(raw?.mileage) || 0)),
@@ -993,7 +996,7 @@ export class WordPressFirebaseService {
       features: Array.isArray(raw?.features)
         ? raw.features
             .filter((f: any) => typeof f === 'string' && f.trim().length > 0)
-            .map((f: string) => f.slice(0, 200))
+            .map((f: string) => f.trim().slice(0, 200))
             .slice(0, 40)
         : [],
       description: String(raw?.description || '').slice(0, 10000),
@@ -1003,7 +1006,7 @@ export class WordPressFirebaseService {
       seoDescription: raw?.seoDescription ? String(raw.seoDescription).slice(0, 500) : '',
       createdAt: timestampToIso(raw?.createdAt),
       updatedAt: timestampToIso(raw?.updatedAt),
-    } as Vehicle;
+    };
   }
 
   // Compresses uploaded photos into durable self-contained Data URLs so they persist forever inside Cloud Firestore
@@ -1120,7 +1123,7 @@ export class WordPressFirebaseService {
           const budgeted = await fitVehicleImagesToFirestoreBudget(
             rawVeh.mainImage,
             rawVeh.gallery,
-            760000
+            650000
           );
           const veh = WordPressFirebaseService.normalizeVehicle({
             ...rawVeh,
@@ -1201,14 +1204,15 @@ export class WordPressFirebaseService {
     isAdmin = false
   ) {
     let isDisposed = false;
+    let hasServerFirestoreSnapshot = false;
 
     // 1. Immediately emit synchronous local cached vehicles
     const current = WordPressFirebaseService.getLocalVehicles();
     callback(current);
 
-    // 1b. Hydrate unlimited IndexedDB mirror asynchronously
+    // 1b. Hydrate unlimited IndexedDB mirror asynchronously (before authoritative Firestore response)
     WordPressFirebaseService.idbLoadVehicles().then((idbList) => {
-      if (isDisposed || !idbList || idbList.length === 0) return;
+      if (isDisposed || hasServerFirestoreSnapshot || !idbList || idbList.length === 0) return;
       const deletedSet = WordPressFirebaseService.getDeletedVehicleIds();
       const merged = WordPressFirebaseService.mergeVehicles(
         WordPressFirebaseService.getLocalVehicles(),
@@ -1227,9 +1231,9 @@ export class WordPressFirebaseService {
     };
     window.addEventListener('vsp-vehicles-sync', handleSyncEvent);
 
-    // 3. Load from persistent server API (/api/vehicles)
+    // 3. Load from container server API (/api/vehicles) ONLY as fallback before Cloud Firestore responds
     WordPressFirebaseService.fetchServerVehicles().then(async (serverList) => {
-      if (isDisposed || serverList === null) return;
+      if (isDisposed || hasServerFirestoreSnapshot || serverList === null) return;
       const deletedSet = WordPressFirebaseService.getDeletedVehicleIds();
       const localList = WordPressFirebaseService.getLocalVehicles();
 
@@ -1241,6 +1245,7 @@ export class WordPressFirebaseService {
         callback(merged);
       } else if (localList.length > 0) {
         for (const v of localList) {
+          if (deletedSet.has(v.id)) continue;
           try {
             await fetch('/api/vehicles', {
               method: 'POST',
@@ -1260,6 +1265,8 @@ export class WordPressFirebaseService {
     const unsubFirestore = onSnapshot(
       vehiclesQuery,
       async (snapshot) => {
+        if (isDisposed) return;
+
         const firestoreList: Vehicle[] = [];
         snapshot.forEach((docSnap) => {
           firestoreList.push(
@@ -1279,6 +1286,7 @@ export class WordPressFirebaseService {
 
         // Clean pending flags for vehicles now confirmed present in Cloud Firestore server snapshot
         if (!snapshot.metadata.fromCache) {
+          hasServerFirestoreSnapshot = true;
           for (const fsVeh of firestoreList) {
             if (pendingSet.has(fsVeh.id)) {
               WordPressFirebaseService.clearPendingCloudSync(fsVeh.id);
@@ -1295,7 +1303,8 @@ export class WordPressFirebaseService {
           const finalList = baseList.filter((v) => !deletedSet.has(v.id));
           WordPressFirebaseService.setLocalVehicles(finalList);
           callback(finalList);
-        } else if (!snapshot.metadata.fromCache && pendingLocals.length > 0) {
+        } else if (!snapshot.metadata.fromCache) {
+          // Authoritative empty Firestore server snapshot: keep only truly pending local uploads
           WordPressFirebaseService.setLocalVehicles(pendingLocals);
           callback(pendingLocals);
         }
@@ -1335,7 +1344,7 @@ export class WordPressFirebaseService {
     const rawGallery = vehicle.gallery && vehicle.gallery.length > 0 ? vehicle.gallery : [rawMain];
 
     // Ensure every photo is durable and total document payload fits well inside Cloud Firestore (< 1 MB)
-    const budgetedImages = await fitVehicleImagesToFirestoreBudget(rawMain, rawGallery, 760000);
+    const budgetedImages = await fitVehicleImagesToFirestoreBudget(rawMain, rawGallery, 650000);
 
     const data = WordPressFirebaseService.normalizeVehicle({
       id,

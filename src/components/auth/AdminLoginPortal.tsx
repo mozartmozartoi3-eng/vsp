@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Lock, Mail, KeyRound, Eye, EyeOff, ShieldCheck, ArrowLeft, CheckCircle2, AlertCircle, Chrome } from 'lucide-react';
+import { Lock, Mail, KeyRound, Eye, EyeOff, ShieldCheck, ArrowLeft, CheckCircle2, AlertCircle, Chrome, Cloud } from 'lucide-react';
 import { signInAdminWithGoogle, signInWithSharedCredentials, ADMIN_EMAIL } from '../../firebase';
 
 interface AdminLoginPortalProps {
@@ -15,6 +15,7 @@ export const AdminLoginPortal: React.FC<AdminLoginPortalProps> = ({
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cloudSyncWarning, setCloudSyncWarning] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
@@ -31,6 +32,7 @@ export const AdminLoginPortal: React.FC<AdminLoginPortalProps> = ({
 
   const handleGoogleSignIn = async () => {
     setError(null);
+    setCloudSyncWarning(null);
     setIsGoogleLoading(true);
     try {
       const user = await signInAdminWithGoogle();
@@ -45,30 +47,48 @@ export const AdminLoginPortal: React.FC<AdminLoginPortalProps> = ({
       if (err?.code === 'auth/popup-closed-by-user') {
         setError('La fenêtre de connexion Google a été fermée avant la validation.');
       } else if (err?.code === 'auth/popup-blocked') {
-        setError('Le navigateur a bloqué la fenêtre Google. Autorisez les pop-ups ou utilisez les identifiants communs ci-dessous.');
+        setError('Le navigateur a bloqué la fenêtre Google. Autorisez les pop-ups pour ce site puis réessayez.');
+      } else if (err?.code === 'auth/unauthorized-domain') {
+        setError('Ce domaine doit être ajouté dans Firebase Authentication > Paramètres > Domaines autorisés.');
       } else {
         setError(err?.message || 'Erreur lors de la connexion Google.');
       }
     }
   };
 
+  const handleContinueLocalOnly = () => {
+    persistAdminSession(email.trim().toLowerCase() || ADMIN_EMAIL);
+    setIsSuccess(true);
+    setTimeout(() => {
+      onLoginSuccess();
+    }, 200);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setCloudSyncWarning(null);
 
     const cleanEmail = email.trim().toLowerCase();
     const cleanPassword = password.trim();
 
     if (cleanEmail === ADMIN_EMAIL && cleanPassword === 'Panneliste3@') {
       setIsLoading(true);
-      await signInWithSharedCredentials(cleanEmail, cleanPassword);
-      setIsSuccess(true);
-      persistAdminSession(cleanEmail);
+      const authRes = await signInWithSharedCredentials(cleanEmail, cleanPassword);
+      setIsLoading(false);
 
-      setTimeout(() => {
-        setIsLoading(false);
-        onLoginSuccess();
-      }, 350);
+      if (authRes.firebaseAuthenticated) {
+        setIsSuccess(true);
+        persistAdminSession(cleanEmail);
+        setTimeout(() => {
+          onLoginSuccess();
+        }, 300);
+      } else {
+        setCloudSyncWarning(
+          authRes.errorMessage ||
+            `La synchronisation Cloud Firebase par mot de passe n'est pas encore active. Cliquez sur "Connexion Google partagée (Cloud)" ci-dessus pour synchroniser vos véhicules entre le propriétaire et le concepteur.`
+        );
+      }
     } else {
       setError('Identifiants invalides. Utilisez l’accès commun administrateur.');
     }
@@ -112,7 +132,7 @@ export const AdminLoginPortal: React.FC<AdminLoginPortalProps> = ({
               Connexion Administration
             </h1>
             <p className="text-xs text-slate-400 mt-1">
-              Un seul accès commun pour gérer le parc, les commandes et les coordonnées bancaires
+              Un seul accès commun synchronisé en temps réel sur tous vos appareils
             </p>
           </div>
 
@@ -120,6 +140,38 @@ export const AdminLoginPortal: React.FC<AdminLoginPortalProps> = ({
             <div className="mb-5 p-3.5 bg-red-950/60 border border-red-800/80 rounded-lg flex items-start gap-2.5 text-xs text-red-200">
               <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
               <div className="leading-relaxed">{error}</div>
+            </div>
+          )}
+
+          {cloudSyncWarning && (
+            <div className="mb-5 p-4 bg-amber-950/70 border border-amber-700/80 rounded-lg space-y-3 text-xs text-amber-100">
+              <div className="flex items-start gap-2.5">
+                <Cloud className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <div className="leading-relaxed">
+                  <strong className="block text-amber-200 mb-1">
+                    Synchronisation Cloud non active avec le mot de passe seul
+                  </strong>
+                  <span>{cloudSyncWarning}</span>
+                </div>
+              </div>
+              <div className="flex flex-col gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={handleGoogleSignIn}
+                  disabled={isGoogleLoading}
+                  className="w-full py-2.5 px-3 bg-white hover:bg-slate-100 text-slate-900 font-bold text-xs rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <Chrome className="w-4 h-4 text-blue-600" />
+                  <span>Se connecter avec Google (Synchronisation immédiate)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleContinueLocalOnly}
+                  className="w-full py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-[11px] font-semibold rounded-lg transition-colors cursor-pointer"
+                >
+                  Entrer quand même en mode local (cet appareil uniquement)
+                </button>
+              </div>
             </div>
           )}
 
@@ -145,7 +197,7 @@ export const AdminLoginPortal: React.FC<AdminLoginPortalProps> = ({
             ) : (
               <>
                 <Chrome className="w-4 h-4 text-blue-600" />
-                <span>Connexion Google partagée (Cloud)</span>
+                <span>Connexion Google partagée (Recommandé · Cloud)</span>
               </>
             )}
           </button>
@@ -230,3 +282,4 @@ export const AdminLoginPortal: React.FC<AdminLoginPortalProps> = ({
     </div>
   );
 };
+

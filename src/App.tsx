@@ -148,6 +148,7 @@ export default function App() {
     isAuthorizedAdminUser(auth.currentUser)
   );
   const [googleConnectLoading, setGoogleConnectLoading] = useState(false);
+  const [googleConnectError, setGoogleConnectError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -166,6 +167,7 @@ export default function App() {
 
       setIsFirebaseAdmin(authorized);
       if (authorized) {
+        setGoogleConnectError(null);
         setIsAdminAuthenticated(true);
         try {
           sessionStorage.setItem('vsp_admin_auth', 'authenticated');
@@ -184,6 +186,7 @@ export default function App() {
   }, []);
 
   const handleConnectGoogleAdmin = async () => {
+    setGoogleConnectError(null);
     setGoogleConnectLoading(true);
     try {
       await signInAdminWithGoogle();
@@ -192,8 +195,18 @@ export default function App() {
       await WordPressFirebaseService.seedInitialDataIfEmpty();
       await WordPressFirebaseService.syncPendingCommercialSettings();
       await WordPressFirebaseService.syncLocalVehiclesToFirestore();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Google admin connection error:', err);
+      const code = String(err?.code || '');
+      if (code === 'auth/popup-closed-by-user') {
+        setGoogleConnectError('La fenêtre de connexion Google a été fermée avant la validation.');
+      } else if (code === 'auth/popup-blocked') {
+        setGoogleConnectError('Le navigateur a bloqué la fenêtre Google. Autorisez les pop-ups pour ce site puis réessayez.');
+      } else if (code === 'auth/unauthorized-domain') {
+        setGoogleConnectError('Ce domaine doit être ajouté dans Firebase Authentication > Paramètres > Domaines autorisés.');
+      } else {
+        setGoogleConnectError(err?.message || 'Impossible de connecter le compte Google partagé.');
+      }
     } finally {
       setGoogleConnectLoading(false);
     }
@@ -267,15 +280,30 @@ export default function App() {
     });
   };
 
-  // Seed Firestore & sync local/server data automatically once verified Google Admin is signed in
+  // Seed Firestore & sync local/server data automatically once verified Firebase Admin is signed in
   useEffect(() => {
     if (!isFirebaseAdmin) return;
-    WordPressFirebaseService.seedInitialDataIfEmpty().then((seeded) => {
-      if (seeded) {
-        console.log('Firebase initialized & synchronized with dealership collections!');
+    let cancelled = false;
+    (async () => {
+      try {
+        const seeded = await WordPressFirebaseService.seedInitialDataIfEmpty();
+        if (seeded && !cancelled) {
+          console.log('Firebase initialized & synchronized with dealership collections!');
+        }
+        await WordPressFirebaseService.syncPendingCommercialSettings();
+        await WordPressFirebaseService.syncLocalVehiclesToFirestore();
+      } catch (err: any) {
+        if (!cancelled) {
+          console.error('Auto Cloud sync error:', err);
+          setGoogleConnectError(
+            err?.message || 'Erreur lors de la synchronisation automatique vers Cloud Firestore.'
+          );
+        }
       }
-    });
-    void WordPressFirebaseService.syncPendingCommercialSettings();
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [isFirebaseAdmin]);
 
   // Public + non-PII subscriptions + connection check on mount
@@ -578,6 +606,7 @@ export default function App() {
                   commercialSettings={commercialSettings}
                   isFirebaseAdmin={isFirebaseAdmin}
                   googleConnectLoading={googleConnectLoading}
+                  googleConnectError={googleConnectError}
                   onConnectGoogle={handleConnectGoogleAdmin}
                   onNavigate={handleNavigate}
                   onToggleFrontOffice={() => setIsFrontOffice(true)}
@@ -596,6 +625,7 @@ export default function App() {
                   connectionStatus={connectionStatus}
                   isFirebaseAdmin={isFirebaseAdmin}
                   googleConnectLoading={googleConnectLoading}
+                  googleConnectError={googleConnectError}
                   onConnectGoogle={handleConnectGoogleAdmin}
                   isCreating={isCreatingVehicle || activeMenu === 'vehicles-new'}
                   onCloseCreate={() => setIsCreatingVehicle(false)}
@@ -631,6 +661,7 @@ export default function App() {
                   settings={commercialSettings}
                   isFirebaseAdmin={isFirebaseAdmin}
                   googleConnectLoading={googleConnectLoading}
+                  googleConnectError={googleConnectError}
                   onConnectGoogle={handleConnectGoogleAdmin}
                 />
               )}

@@ -49,6 +49,7 @@ interface WpVehiclesProps {
   connectionStatus?: FirebaseConnectionStatus;
   isFirebaseAdmin?: boolean;
   googleConnectLoading?: boolean;
+  googleConnectError?: string | null;
   onConnectGoogle?: () => Promise<void> | void;
   onViewInFront?: (slug: string) => void;
   isCreating?: boolean;
@@ -63,6 +64,7 @@ export const WpVehicles: React.FC<WpVehiclesProps> = ({
   connectionStatus,
   isFirebaseAdmin = false,
   googleConnectLoading = false,
+  googleConnectError = null,
   onConnectGoogle,
   onViewInFront,
   isCreating: isCreatingProp,
@@ -715,28 +717,36 @@ export const WpVehicles: React.FC<WpVehiclesProps> = ({
 
       {/* Single shared Cloud synchronization banner when not connected with Google */}
       {!isFirebaseAdmin && (
-        <div className="mb-5 p-4 bg-amber-50 border border-amber-300 rounded-xl text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-start gap-3">
-            <Cloud className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-            <div className="text-xs leading-relaxed">
-              <strong className="block text-amber-950">
-                Synchronisation Cloud Firestore requise ({pendingSyncIds.size > 0 ? `${pendingSyncIds.size} véhicule(s) en attente` : 'Mode local'})
-              </strong>
-              <span className="text-amber-800">
-                Connectez le compte Google commun ({ADMIN_EMAIL}) pour publier et retrouver vos véhicules et photos sur tous les appareils.
-              </span>
+        <div className="mb-5 p-4 bg-amber-50 border border-amber-300 rounded-xl text-amber-950 space-y-2.5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <Cloud className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+              <div className="text-xs leading-relaxed">
+                <strong className="block text-amber-950">
+                  Synchronisation Cloud Firestore requise ({pendingSyncIds.size > 0 ? `${pendingSyncIds.size} véhicule(s) en attente` : 'Mode local uniquement'})
+                </strong>
+                <span className="text-amber-800">
+                  Tant que Cloud Firestore n&apos;est pas connecté, vos ajouts restent sur cet appareil et ne sont pas visibles par l&apos;autre administrateur. Connectez le compte Google commun ({ADMIN_EMAIL}) pour publier partout.
+                </span>
+              </div>
             </div>
+            {onConnectGoogle && (
+              <button
+                type="button"
+                onClick={() => onConnectGoogle()}
+                disabled={googleConnectLoading}
+                className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer shrink-0 disabled:opacity-60"
+              >
+                {googleConnectLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Cloud className="w-3.5 h-3.5" />}
+                <span>{googleConnectLoading ? 'Connexion...' : 'Connecter Google & Synchroniser'}</span>
+              </button>
+            )}
           </div>
-          {onConnectGoogle && (
-            <button
-              type="button"
-              onClick={() => onConnectGoogle()}
-              disabled={googleConnectLoading}
-              className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer shrink-0 disabled:opacity-60"
-            >
-              {googleConnectLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Cloud className="w-3.5 h-3.5" />}
-              <span>{googleConnectLoading ? 'Connexion...' : 'Connecter Google & Synchroniser'}</span>
-            </button>
+          {googleConnectError && (
+            <div className="p-2.5 bg-red-50 border border-red-300 rounded-lg text-xs text-red-800 font-medium flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+              <span>{googleConnectError}</span>
+            </div>
           )}
         </div>
       )}

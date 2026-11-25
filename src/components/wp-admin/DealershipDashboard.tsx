@@ -34,6 +34,7 @@ interface DealershipDashboardProps {
   commercialSettings: CommercialBankSettings;
   isFirebaseAdmin?: boolean;
   googleConnectLoading?: boolean;
+  googleConnectError?: string | null;
   onConnectGoogle?: () => Promise<void> | void;
   onNavigate: (menu: AdminMenuKey) => void;
   onToggleFrontOffice: () => void;
@@ -46,6 +47,7 @@ export const DealershipDashboard: React.FC<DealershipDashboardProps> = ({
   commercialSettings,
   isFirebaseAdmin = false,
   googleConnectLoading = false,
+  googleConnectError = null,
   onConnectGoogle,
   onNavigate,
   onToggleFrontOffice,
@@ -147,21 +149,28 @@ export const DealershipDashboard: React.FC<DealershipDashboardProps> = ({
 
       {/* Single shared Google Cloud sync banner if logged in via password only */}
       {!isFirebaseAdmin && onConnectGoogle && (
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="text-xs text-blue-950">
-            <strong className="block font-bold">Synchronisation Cloud Firestore</strong>
-            <span className="text-blue-800">
-              Connectez le compte Google commun ({ADMIN_EMAIL}) pour partager en temps réel les véhicules, photos et coordonnées bancaires sur tous les appareils.
-            </span>
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-2">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="text-xs text-blue-950">
+              <strong className="block font-bold">Synchronisation Cloud Firestore non active (mode local uniquement)</strong>
+              <span className="text-blue-800">
+                Connectez le compte Google commun ({ADMIN_EMAIL}) pour que les véhicules, photos et coordonnées bancaires soient visibles entre le propriétaire et le concepteur.
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => onConnectGoogle()}
+              disabled={googleConnectLoading}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shrink-0 transition-colors cursor-pointer disabled:opacity-60"
+            >
+              {googleConnectLoading ? 'Connexion...' : 'Connecter Google (Cloud)'}
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => onConnectGoogle()}
-            disabled={googleConnectLoading}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shrink-0 transition-colors cursor-pointer disabled:opacity-60"
-          >
-            {googleConnectLoading ? 'Connexion...' : 'Connecter Google (Cloud)'}
-          </button>
+          {googleConnectError && (
+            <div className="p-2.5 bg-red-50 border border-red-200 rounded-lg text-xs text-red-800 font-medium">
+              {googleConnectError}
+            </div>
+          )}
         </div>
       )}
 

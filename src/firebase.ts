@@ -5,6 +5,7 @@ import {
   GoogleAuthProvider,
   signInWithPopup,
   signInWithEmailAndPassword,
+  sendEmailVerification,
   signOut,
   User,
 } from 'firebase/auth';
@@ -61,16 +62,97 @@ export async function verifyAdminAuthorization(
   return false;
 }
 
+export interface SharedCredentialsAuthResult {
+  firebaseAuthenticated: boolean;
+  reason:
+    | 'ok'
+    | 'email_not_verified'
+    | 'operation_not_allowed'
+    | 'user_not_found'
+    | 'invalid_credential'
+    | 'unauthorized_email'
+    | 'error';
+  verificationSent?: boolean;
+  errorMessage?: string;
+  user?: User;
+}
+
 export async function signInWithSharedCredentials(
   email: string,
   password: string
-): Promise<{ firebaseAuthenticated: boolean; user?: User }> {
+): Promise<SharedCredentialsAuthResult> {
   try {
     const res = await signInWithEmailAndPassword(auth, email.trim(), password);
+
+    if (res.user.emailVerified !== true) {
+      let verificationSent = false;
+      try {
+        await sendEmailVerification(res.user);
+        verificationSent = true;
+      } catch (verifyErr) {
+        console.warn('Envoi lien de vérification ignoré:', verifyErr);
+      }
+      await signOut(auth).catch(() => {});
+      return {
+        firebaseAuthenticated: false,
+        reason: 'email_not_verified',
+        verificationSent,
+        errorMessage: verificationSent
+          ? `Votre compte e-mail Firebase n'est pas encore vérifié. Un lien de validation vient d'être envoyé à ${email.trim()}. Cliquez dessus puis reconnectez-vous (ou utilisez "Connexion Google partagée" ci-dessus).`
+          : `Votre compte e-mail Firebase n'est pas encore vérifié. Validez l'e-mail de vérification Firebase ou utilisez "Connexion Google partagée" ci-dessus.`,
+      };
+    }
+
     const authorized = await verifyAdminAuthorization(res.user);
-    return { firebaseAuthenticated: authorized, user: res.user };
-  } catch {
-    return { firebaseAuthenticated: false };
+    if (!authorized) {
+      await signOut(auth).catch(() => {});
+      return {
+        firebaseAuthenticated: false,
+        reason: 'unauthorized_email',
+        errorMessage: `Le compte ${res.user.email} n'est pas autorisé pour Cloud Firestore.`,
+      };
+    }
+
+    return { firebaseAuthenticated: true, reason: 'ok', user: res.user };
+  } catch (err: any) {
+    const code = String(err?.code || '');
+    if (code === 'auth/operation-not-allowed') {
+      return {
+        firebaseAuthenticated: false,
+        reason: 'operation_not_allowed',
+        errorMessage:
+          `La connexion par E-mail/Mot de passe n'est pas encore activée dans Firebase Authentication. Cliquez sur "Connexion Google partagée (Cloud)" ci-dessus pour synchroniser vos véhicules immédiatement.`,
+      };
+    }
+    if (code === 'auth/user-not-found') {
+      return {
+        firebaseAuthenticated: false,
+        reason: 'user_not_found',
+        errorMessage:
+          `Aucun compte E-mail/Mot de passe Firebase trouvé pour ${email.trim()}. Utilisez "Connexion Google partagée (Cloud)" ci-dessus pour synchroniser vos véhicules et photos.`,
+      };
+    }
+    if (code === 'auth/invalid-credential' || code === 'auth/wrong-password') {
+      return {
+        firebaseAuthenticated: false,
+        reason: 'invalid_credential',
+        errorMessage:
+          `Le mot de passe Firebase de ${email.trim()} ne correspond pas ou le compte E-mail/Mot de passe n'a pas encore été créé dans Firebase. Utilisez "Connexion Google partagée (Cloud)" ci-dessus.`,
+      };
+    }
+    if (code === 'auth/too-many-requests') {
+      return {
+        firebaseAuthenticated: false,
+        reason: 'error',
+        errorMessage:
+          `Trop de tentatives récentes. Utilisez "Connexion Google partagée (Cloud)" ci-dessus.`,
+      };
+    }
+    return {
+      firebaseAuthenticated: false,
+      reason: 'error',
+      errorMessage: err?.message || 'Connexion Cloud Firebase impossible par mot de passe.',
+    };
   }
 }
 

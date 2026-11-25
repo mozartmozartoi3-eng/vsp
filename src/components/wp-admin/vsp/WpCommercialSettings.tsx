@@ -21,6 +21,7 @@ interface WpCommercialSettingsProps {
   settings: CommercialBankSettings;
   isFirebaseAdmin?: boolean;
   googleConnectLoading?: boolean;
+  googleConnectError?: string | null;
   onConnectGoogle?: () => Promise<void> | void;
 }
 
@@ -28,6 +29,7 @@ export const WpCommercialSettings: React.FC<WpCommercialSettingsProps> = ({
   settings,
   isFirebaseAdmin = false,
   googleConnectLoading = false,
+  googleConnectError = null,
   onConnectGoogle,
 }) => {
   const [formData, setFormData] = useState<CommercialBankSettings>(settings);
@@ -80,21 +82,28 @@ export const WpCommercialSettings: React.FC<WpCommercialSettingsProps> = ({
       </div>
 
       {!isFirebaseAdmin && onConnectGoogle && (
-        <div className="mb-6 p-4 bg-amber-50 border border-amber-200 text-amber-900 text-xs rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-            <span>
-              Pour synchroniser vos nouveaux paramètres bancaires en ligne pour tous les clients, connectez le compte Google commun ({ADMIN_EMAIL}).
-            </span>
+        <div className="mb-6 p-4 bg-amber-50 border border-amber-200 text-amber-900 text-xs rounded-lg space-y-2.5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <span>
+                Pour synchroniser vos nouveaux paramètres bancaires en ligne pour tous les clients, connectez le compte Google commun ({ADMIN_EMAIL}).
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => onConnectGoogle()}
+              disabled={googleConnectLoading}
+              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded shrink-0 cursor-pointer disabled:opacity-60"
+            >
+              {googleConnectLoading ? 'Connexion...' : 'Connecter Google (Cloud)'}
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => onConnectGoogle()}
-            disabled={googleConnectLoading}
-            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded shrink-0 cursor-pointer disabled:opacity-60"
-          >
-            {googleConnectLoading ? 'Connexion...' : 'Connecter Google (Cloud)'}
-          </button>
+          {googleConnectError && (
+            <div className="p-2.5 bg-red-50 border border-red-300 rounded text-xs text-red-800 font-medium">
+              {googleConnectError}
+            </div>
+          )}
         </div>
       )}
 

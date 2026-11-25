@@ -162,7 +162,7 @@ function reencodeDataUrl(dataUrl: string, maxWidth: number, quality: number): Pr
 
 /**
  * Guarantees a single data:image/... URL fits cleanly under maxChars (default ~160 KB)
- * while leaving regular https:// URLs untouched.
+ * by progressively reducing dimensions & JPEG quality — NEVER truncating base64 mid-stream.
  */
 export async function fitDataUrlToMaxBytes(dataUrl: string, maxChars = 160000): Promise<string> {
   if (!dataUrl || !dataUrl.startsWith('data:image/')) {
@@ -179,6 +179,10 @@ export async function fitDataUrlToMaxBytes(dataUrl: string, maxChars = 160000): 
     [540, 0.48],
     [420, 0.42],
     [320, 0.36],
+    [260, 0.30],
+    [200, 0.25],
+    [150, 0.22],
+    [110, 0.18],
   ];
 
   let current = dataUrl;
@@ -188,7 +192,16 @@ export async function fitDataUrlToMaxBytes(dataUrl: string, maxChars = 160000): 
       return current;
     }
   }
-  return current.slice(0, maxChars);
+  return current;
+}
+
+function measureSerializedImagesChars(mainImage: string, gallery: string[]): number {
+  const mainLen = mainImage && mainImage.startsWith('data:image/') ? mainImage.length : 0;
+  const galLen = gallery.reduce(
+    (sum, item) => sum + (item && item.startsWith('data:image/') ? item.length : 0),
+    0
+  );
+  return mainLen + galLen;
 }
 
 /**
@@ -198,70 +211,72 @@ export async function fitDataUrlToMaxBytes(dataUrl: string, maxChars = 160000): 
 export async function fitVehicleImagesToFirestoreBudget(
   mainImage: string,
   gallery: string[],
-  totalCharBudget = 760000
+  totalCharBudget = 650000
 ): Promise<{ mainImage: string; gallery: string[] }> {
-  const safeMainTarget = Math.min(180000, Math.floor(totalCharBudget * 0.3));
-  const compressedMain = await fitDataUrlToMaxBytes(mainImage, safeMainTarget);
+  const dedupedRaw: string[] = [];
+  for (const item of gallery) {
+    const clean = typeof item === 'string' ? item.trim() : '';
+    if (clean && !dedupedRaw.includes(clean)) {
+      dedupedRaw.push(clean);
+    }
+  }
+  const rawList = dedupedRaw.length > 0 ? dedupedRaw.slice(0, 30) : [mainImage];
 
-  const rawList = gallery.length > 0 ? gallery.slice(0, 30) : [compressedMain];
-  // Collect distinct data URLs beyond mainImage
-  const extraDataUrls = Array.from(
-    new Set(
-      rawList.filter(
-        (item) => item && item.startsWith('data:image/') && item !== mainImage && item !== compressedMain
-      )
-    )
+  // Count how many distinct image slots consume budget (mainImage is also mirrored in gallery[0] if included)
+  const mainAppearsInGallery = rawList.some((item) => item === mainImage);
+  const extraDataUrls = rawList.filter(
+    (item) => item.startsWith('data:image/') && item !== mainImage
   );
 
-  const remainingBudget = Math.max(80000, totalCharBudget - compressedMain.length);
-  const perExtraBudget =
+  // Total serialized copies of data URLs: (main copies: 1 or 2) + extraDataUrls.length
+  const mainWeight = mainImage.startsWith('data:image/') ? (mainAppearsInGallery ? 2 : 1) : 0;
+  const totalWeightedSlots = Math.max(1, mainWeight + extraDataUrls.length);
+
+  const initialMainCap = Math.min(
+    180000,
+    Math.floor((totalCharBudget * Math.max(1, mainWeight)) / (totalWeightedSlots + 0.5))
+  );
+  let compressedMain = await fitDataUrlToMaxBytes(mainImage, Math.max(45000, initialMainCap));
+
+  const remainingAfterMain = Math.max(60000, totalCharBudget - compressedMain.length * mainWeight);
+  const initialExtraCap =
     extraDataUrls.length > 0
-      ? Math.max(22000, Math.min(140000, Math.floor(remainingBudget / extraDataUrls.length)))
-      : 140000;
+      ? Math.max(25000, Math.min(130000, Math.floor(remainingAfterMain / extraDataUrls.length)))
+      : 130000;
 
   const extraMap = new Map<string, string>();
   for (const src of extraDataUrls) {
-    extraMap.set(src, await fitDataUrlToMaxBytes(src, perExtraBudget));
+    extraMap.set(src, await fitDataUrlToMaxBytes(src, initialExtraCap));
   }
 
-  const finalGallery = rawList.map((item) => {
-    if (item === mainImage || item === compressedMain) return compressedMain;
-    return extraMap.get(item) || item;
-  });
+  let finalGallery = rawList.map((item) =>
+    item === mainImage ? compressedMain : extraMap.get(item) || item
+  );
 
-  // Final total safeguard in case many distinct images were included
-  let totalDataChars =
-    (compressedMain.startsWith('data:image/') ? compressedMain.length : 0) +
-    Array.from(extraMap.values()).reduce((sum, val) => sum + val.length, 0);
+  // Iterative total safeguard: measure exact serialized sum across mainImage + ALL gallery entries
+  for (let pass = 0; pass < 3; pass++) {
+    const totalChars = measureSerializedImagesChars(compressedMain, finalGallery);
+    if (totalChars <= totalCharBudget) {
+      break;
+    }
 
-  if (totalDataChars > totalCharBudget && extraDataUrls.length > 0) {
-    const tighterBudget = Math.max(
-      18000,
-      Math.floor((totalCharBudget - compressedMain.length) / extraDataUrls.length)
+    const ratio = (totalCharBudget * 0.9) / Math.max(1, totalChars);
+    if (compressedMain.startsWith('data:image/')) {
+      const nextMainTarget = Math.max(28000, Math.floor(compressedMain.length * ratio));
+      compressedMain = await fitDataUrlToMaxBytes(compressedMain, nextMainTarget);
+    }
+
+    for (const [orig, currentVal] of extraMap.entries()) {
+      const nextTarget = Math.max(20000, Math.floor(currentVal.length * ratio));
+      extraMap.set(orig, await fitDataUrlToMaxBytes(currentVal, nextTarget));
+    }
+
+    finalGallery = rawList.map((item) =>
+      item === mainImage ? compressedMain : extraMap.get(item) || item
     );
-    for (const [orig, val] of extraMap.entries()) {
-      extraMap.set(orig, await fitDataUrlToMaxBytes(val, tighterBudget));
-    }
-    totalDataChars =
-      (compressedMain.startsWith('data:image/') ? compressedMain.length : 0) +
-      Array.from(extraMap.values()).reduce((sum, val) => sum + val.length, 0);
-    if (totalDataChars > totalCharBudget) {
-      const ultraMain = await fitDataUrlToMaxBytes(compressedMain, 100000);
-      return {
-        mainImage: ultraMain,
-        gallery: rawList.map((item) =>
-          item === mainImage || item === compressedMain ? ultraMain : extraMap.get(item) || item
-        ),
-      };
-    }
-    return {
-      mainImage: compressedMain,
-      gallery: rawList.map((item) =>
-        item === mainImage || item === compressedMain ? compressedMain : extraMap.get(item) || item
-      ),
-    };
   }
 
   return { mainImage: compressedMain, gallery: finalGallery };
 }
+
 
