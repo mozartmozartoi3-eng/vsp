@@ -37,7 +37,7 @@ import {
   VehicleEnergy,
   VehicleCondition,
 } from '../../../types/wordpress';
-import { auth, ADMIN_EMAIL, FirebaseConnectionStatus, isAuthorizedAdminUser } from '../../../firebase';
+import { auth, FirebaseConnectionStatus, isAuthorizedAdminUser } from '../../../firebase';
 import { WordPressFirebaseService } from '../../../services/wordpressService';
 import { VSP_COLOR_PRESETS, VehicleColorPreset, compressImageFile } from '../../../utils/vehicleColors';
 import { WpBulkVehiclesModal, INITIAL_6_VSP_PRESETS } from './WpBulkVehiclesModal';
@@ -48,9 +48,6 @@ interface WpVehiclesProps {
   brands: VehicleBrand[];
   connectionStatus?: FirebaseConnectionStatus;
   isFirebaseAdmin?: boolean;
-  googleConnectLoading?: boolean;
-  googleConnectError?: string | null;
-  onConnectGoogle?: () => Promise<void> | void;
   onViewInFront?: (slug: string) => void;
   isCreating?: boolean;
   onCloseCreate?: () => void;
@@ -63,9 +60,6 @@ export const WpVehicles: React.FC<WpVehiclesProps> = ({
   brands,
   connectionStatus,
   isFirebaseAdmin = false,
-  googleConnectLoading = false,
-  googleConnectError = null,
-  onConnectGoogle,
   onViewInFront,
   isCreating: isCreatingProp,
   onCloseCreate,
@@ -168,9 +162,7 @@ export const WpVehicles: React.FC<WpVehiclesProps> = ({
 
   const handleForceSyncToCloud = async () => {
     if (!isAuthorizedAdminUser(auth.currentUser)) {
-      if (onConnectGoogle) {
-        await onConnectGoogle();
-      }
+      setErrorToast('Session Cloud non active. Veuillez vous reconnecter au backoffice.');
       return;
     }
     setSyncingCloud(true);
@@ -418,10 +410,10 @@ export const WpVehicles: React.FC<WpVehiclesProps> = ({
         editingVehicle
           ? syncedToCloud
             ? `☁️ "${formBrand} ${formModel}" mis à jour dans Cloud Firestore et visible partout immédiatement !`
-            : `⚠️ "${formBrand} ${formModel}" enregistré en local uniquement : connectez votre compte Google autorisé pour que le concepteur le voie !`
+            : `"${formBrand} ${formModel}" enregistré. Utilisez « Vérifier & Synchroniser » si nécessaire.`
           : syncedToCloud
             ? `☁️ Nouveau véhicule "${formBrand} ${formModel}" enregistré dans Cloud Firestore et visible partout immédiatement !`
-            : `⚠️ "${formBrand} ${formModel}" enregistré en local uniquement : connectez votre compte Google autorisé pour qu'il apparaisse chez le concepteur.`
+            : `"${formBrand} ${formModel}" enregistré. Utilisez « Vérifier & Synchroniser » si nécessaire.`
       );
 
       handleCloseModal();
@@ -486,7 +478,7 @@ export const WpVehicles: React.FC<WpVehiclesProps> = ({
       setSuccessToast(
         syncedToCloud
           ? `☁️ "${formBrand} ${formModel}" enregistré définitivement dans Cloud Firestore ! Saisissez maintenant le véhicule suivant :`
-          : `⏳ "${formBrand} ${formModel}" enregistré localement (en attente Cloud Google). Saisissez maintenant le véhicule suivant :`
+          : `"${formBrand} ${formModel}" enregistré (en attente de synchronisation Cloud). Saisissez maintenant le véhicule suivant :`
       );
 
       setFormModel('');
@@ -605,7 +597,7 @@ export const WpVehicles: React.FC<WpVehiclesProps> = ({
       setSuccessToast(
         syncedToCloud
           ? `☁️ ${importedCount} véhicule${importedCount > 1 ? 's' : ''} importé${importedCount > 1 ? 's' : ''} et sauvegardé${importedCount > 1 ? 's' : ''} de façon permanente dans Cloud Firestore !`
-          : `⏳ ${importedCount} véhicule${importedCount > 1 ? 's' : ''} restauré${importedCount > 1 ? 's' : ''} localement. Cliquez sur « Connecter Google & Synchroniser » pour les figer dans Cloud Firestore.`
+          : `${importedCount} véhicule${importedCount > 1 ? 's' : ''} importé${importedCount > 1 ? 's' : ''}. Cliquez sur « Synchroniser vers Cloud » si nécessaire.`
       );
     } catch (err: any) {
       setErrorToast(`Fichier JSON invalide : ${err?.message || 'Format incorrect'}`);
@@ -655,7 +647,7 @@ export const WpVehicles: React.FC<WpVehiclesProps> = ({
       setSuccessToast(
         syncedToCloud
           ? '☁️ Catalogue de départ (6 modèles VSP types) enregistré définitivement dans Cloud Firestore !'
-          : `⚠️ Catalogue de départ chargé en local uniquement. Connectez votre compte Google autorisé pour le figer dans Cloud Firestore.`
+          : 'Catalogue de départ chargé. Cliquez sur « Synchroniser vers Cloud » si nécessaire.'
       );
     } catch (err: any) {
       setErrorToast(`Erreur lors du chargement du catalogue de départ : ${err?.message || 'Erreur inconnue'}`);
@@ -712,42 +704,6 @@ export const WpVehicles: React.FC<WpVehiclesProps> = ({
           >
             <X className="w-4 h-4" />
           </button>
-        </div>
-      )}
-
-      {/* Single shared Cloud synchronization banner when not connected with Google */}
-      {!isFirebaseAdmin && (
-        <div className="mb-5 p-4 bg-amber-50 border border-amber-300 rounded-xl text-amber-950 space-y-2.5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-start gap-3">
-              <Cloud className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-              <div className="text-xs leading-relaxed">
-                <strong className="block text-amber-950">
-                  Synchronisation Cloud Firestore requise ({pendingSyncIds.size > 0 ? `${pendingSyncIds.size} véhicule(s) en attente` : 'Mode local uniquement'})
-                </strong>
-                <span className="text-amber-800">
-                  Tant que Cloud Firestore n&apos;est pas connecté, vos ajouts restent sur cet appareil et ne sont pas visibles par l&apos;autre administrateur. Connectez le compte Google commun ({ADMIN_EMAIL}) pour publier partout.
-                </span>
-              </div>
-            </div>
-            {onConnectGoogle && (
-              <button
-                type="button"
-                onClick={() => onConnectGoogle()}
-                disabled={googleConnectLoading}
-                className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer shrink-0 disabled:opacity-60"
-              >
-                {googleConnectLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Cloud className="w-3.5 h-3.5" />}
-                <span>{googleConnectLoading ? 'Connexion...' : 'Connecter Google & Synchroniser'}</span>
-              </button>
-            )}
-          </div>
-          {googleConnectError && (
-            <div className="p-2.5 bg-red-50 border border-red-300 rounded-lg text-xs text-red-800 font-medium flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
-              <span>{googleConnectError}</span>
-            </div>
-          )}
         </div>
       )}
 
@@ -1824,7 +1780,7 @@ export const WpVehicles: React.FC<WpVehiclesProps> = ({
           setSuccessToast(
             syncedToCloud
               ? `☁️ ${count} véhicule${count > 1 ? 's' : ''} enregistré${count > 1 ? 's' : ''} dans Cloud Firestore et visible${count > 1 ? 's' : ''} partout !`
-              : `⚠️ ${count} véhicule${count > 1 ? 's' : ''} enregistré${count > 1 ? 's' : ''} en local uniquement : connectez votre compte Google autorisé pour qu'ils soient visibles par le concepteur !`
+              : `${count} véhicule${count > 1 ? 's' : ''} enregistré${count > 1 ? 's' : ''}. Cliquez sur « Synchroniser vers Cloud » si nécessaire.`
           );
           const updated = WordPressFirebaseService.getLocalVehicles();
           onVehiclesUpdated?.(updated);

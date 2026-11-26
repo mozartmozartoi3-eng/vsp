@@ -2,8 +2,6 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore, doc, getDoc, getDocFromServer } from 'firebase/firestore';
 import {
   getAuth,
-  GoogleAuthProvider,
-  signInWithPopup,
   signInWithEmailAndPassword,
   sendEmailVerification,
   signOut,
@@ -11,7 +9,12 @@ import {
 } from 'firebase/auth';
 import appletFirebaseConfig from '../firebase-applet-config.json';
 
-export const ADMIN_EMAIL = 'mozartmozartoi3@gmail.com';
+export const SHARED_ADMIN_EMAIL = 'mozartmozartoi3@gmail.com';
+export const ADMIN_EMAIL = SHARED_ADMIN_EMAIL;
+export const AUTHORIZED_ADMIN_EMAILS = [
+  'mozartmozartoi3@gmail.com',
+  'amautosanspermis@gmail.com',
+] as const;
 
 export const firebaseConfig = appletFirebaseConfig;
 
@@ -19,8 +22,6 @@ export const firebaseConfig = appletFirebaseConfig;
 export const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
-export const googleProvider = new GoogleAuthProvider();
-googleProvider.setCustomParameters({ prompt: 'select_account' });
 
 const verifiedAdminUids = new Set<string>();
 
@@ -31,7 +32,7 @@ export function clearVerifiedAdminCache(): void {
 export function isAuthorizedAdminUser(user: User | null | undefined): boolean {
   if (!user || !user.email || user.emailVerified !== true) return false;
   const emailLower = user.email.trim().toLowerCase();
-  if (emailLower === ADMIN_EMAIL) return true;
+  if ((AUTHORIZED_ADMIN_EMAILS as readonly string[]).includes(emailLower)) return true;
   return verifiedAdminUids.has(user.uid);
 }
 
@@ -42,7 +43,7 @@ export async function verifyAdminAuthorization(
     return false;
   }
   const emailLower = user.email.trim().toLowerCase();
-  if (emailLower === ADMIN_EMAIL) {
+  if ((AUTHORIZED_ADMIN_EMAILS as readonly string[]).includes(emailLower)) {
     return true;
   }
   if (verifiedAdminUids.has(user.uid)) {
@@ -81,8 +82,17 @@ export async function signInWithSharedCredentials(
   email: string,
   password: string
 ): Promise<SharedCredentialsAuthResult> {
+  const cleanEmail = email.trim();
+  if (!cleanEmail || !password) {
+    return {
+      firebaseAuthenticated: false,
+      reason: 'invalid_credential',
+      errorMessage: 'Veuillez saisir votre adresse e-mail et votre mot de passe.',
+    };
+  }
+
   try {
-    const res = await signInWithEmailAndPassword(auth, email.trim(), password);
+    const res = await signInWithEmailAndPassword(auth, cleanEmail, password);
 
     if (res.user.emailVerified !== true) {
       let verificationSent = false;
@@ -98,8 +108,8 @@ export async function signInWithSharedCredentials(
         reason: 'email_not_verified',
         verificationSent,
         errorMessage: verificationSent
-          ? `Votre compte e-mail Firebase n'est pas encore vérifié. Un lien de validation vient d'être envoyé à ${email.trim()}. Cliquez dessus puis reconnectez-vous (ou utilisez "Connexion Google partagée" ci-dessus).`
-          : `Votre compte e-mail Firebase n'est pas encore vérifié. Validez l'e-mail de vérification Firebase ou utilisez "Connexion Google partagée" ci-dessus.`,
+          ? `Première connexion : un lien de validation vient d'être envoyé à ${cleanEmail}. Ouvrez votre boîte mail (vérifiez aussi les spams), cliquez une seule fois sur ce lien puis reconnectez-vous.`
+          : `Cette adresse e-mail doit d'abord être validée via le lien reçu par e-mail (vérifiez aussi les spams) avant de vous connecter.`,
       };
     }
 
@@ -109,7 +119,7 @@ export async function signInWithSharedCredentials(
       return {
         firebaseAuthenticated: false,
         reason: 'unauthorized_email',
-        errorMessage: `Le compte ${res.user.email} n'est pas autorisé pour Cloud Firestore.`,
+        errorMessage: `L'adresse ${res.user.email} n'est pas autorisée à accéder au backoffice.`,
       };
     }
 
@@ -121,7 +131,7 @@ export async function signInWithSharedCredentials(
         firebaseAuthenticated: false,
         reason: 'operation_not_allowed',
         errorMessage:
-          `La connexion par E-mail/Mot de passe n'est pas encore activée dans Firebase Authentication. Cliquez sur "Connexion Google partagée (Cloud)" ci-dessus pour synchroniser vos véhicules immédiatement.`,
+          `La connexion par E-mail / Mot de passe n'est pas encore activée dans Firebase Authentication (Sign-in method). Activez-la une seule fois dans la console Firebase.`,
       };
     }
     if (code === 'auth/user-not-found') {
@@ -129,44 +139,36 @@ export async function signInWithSharedCredentials(
         firebaseAuthenticated: false,
         reason: 'user_not_found',
         errorMessage:
-          `Aucun compte E-mail/Mot de passe Firebase trouvé pour ${email.trim()}. Utilisez "Connexion Google partagée (Cloud)" ci-dessus pour synchroniser vos véhicules et photos.`,
+          `Aucun accès trouvé pour ${cleanEmail}. Vérifiez l'adresse e-mail ou créez ce compte dans Firebase Authentication > Users.`,
       };
     }
     if (code === 'auth/invalid-credential' || code === 'auth/wrong-password') {
       return {
         firebaseAuthenticated: false,
         reason: 'invalid_credential',
-        errorMessage:
-          `Le mot de passe Firebase de ${email.trim()} ne correspond pas ou le compte E-mail/Mot de passe n'a pas encore été créé dans Firebase. Utilisez "Connexion Google partagée (Cloud)" ci-dessus.`,
+        errorMessage: `Identifiant ou mot de passe incorrect.`,
+      };
+    }
+    if (code === 'auth/invalid-email') {
+      return {
+        firebaseAuthenticated: false,
+        reason: 'invalid_credential',
+        errorMessage: `L'adresse e-mail saisie n'est pas valide.`,
       };
     }
     if (code === 'auth/too-many-requests') {
       return {
         firebaseAuthenticated: false,
         reason: 'error',
-        errorMessage:
-          `Trop de tentatives récentes. Utilisez "Connexion Google partagée (Cloud)" ci-dessus.`,
+        errorMessage: `Trop de tentatives récentes. Patientez quelques instants avant de réessayer.`,
       };
     }
     return {
       firebaseAuthenticated: false,
       reason: 'error',
-      errorMessage: err?.message || 'Connexion Cloud Firebase impossible par mot de passe.',
+      errorMessage: err?.message || 'Connexion impossible pour le moment.',
     };
   }
-}
-
-export async function signInAdminWithGoogle(): Promise<User> {
-  const result = await signInWithPopup(auth, googleProvider);
-  const authorized = await verifyAdminAuthorization(result.user);
-  if (!authorized) {
-    const email = result.user?.email || 'inconnu';
-    await signOut(auth).catch(() => {});
-    throw new Error(
-      `Le compte "${email}" ne correspond pas à l'accès partagé (${ADMIN_EMAIL}). Veuillez sélectionner le compte commun ${ADMIN_EMAIL}.`
-    );
-  }
-  return result.user;
 }
 
 export async function signOutFirebaseAdmin(): Promise<void> {

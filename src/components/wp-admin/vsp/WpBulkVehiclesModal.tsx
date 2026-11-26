@@ -891,7 +891,7 @@ export const WpBulkVehiclesModal: React.FC<WpBulkVehiclesModalProps> = ({
                   <strong>{readyToSaveSlots.length} véhicule{readyToSaveSlots.length > 1 ? 's' : ''}</strong> prêt{readyToSaveSlots.length > 1 ? 's' : ''} —{' '}
                   {isFirebaseAdmin
                     ? 'enregistrement direct et permanent dans Cloud Firestore.'
-                    : 'enregistrement local/serveur immédiat + file d’attente Cloud Google.'}
+                    : 'enregistrement immédiat + file d’attente Cloud Firestore.'}
                 </span>
               </span>
             )}

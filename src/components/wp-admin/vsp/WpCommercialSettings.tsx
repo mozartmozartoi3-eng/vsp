@@ -15,22 +15,12 @@ import {
 import { CommercialBankSettings } from '../../../types/wordpress';
 import { WordPressFirebaseService } from '../../../services/wordpressService';
 
-import { ADMIN_EMAIL } from '../../../firebase';
-
 interface WpCommercialSettingsProps {
   settings: CommercialBankSettings;
-  isFirebaseAdmin?: boolean;
-  googleConnectLoading?: boolean;
-  googleConnectError?: string | null;
-  onConnectGoogle?: () => Promise<void> | void;
 }
 
 export const WpCommercialSettings: React.FC<WpCommercialSettingsProps> = ({
   settings,
-  isFirebaseAdmin = false,
-  googleConnectLoading = false,
-  googleConnectError = null,
-  onConnectGoogle,
 }) => {
   const [formData, setFormData] = useState<CommercialBankSettings>(settings);
   const [saving, setSaving] = useState(false);
@@ -58,7 +48,7 @@ export const WpCommercialSettings: React.FC<WpCommercialSettingsProps> = ({
         cloudSynced: res.cloudSynced,
         text: res.cloudSynced
           ? 'Coordonnées commerciales et bancaires enregistrées dans Cloud Firestore et actives immédiatement sur le site.'
-          : `Modifications enregistrées localement. Connectez Google (${ADMIN_EMAIL}) pour les publier vers Cloud Firestore sur tous les appareils.`,
+          : 'Modifications enregistrées. Reconnectez-vous si la synchronisation Cloud prend plus de quelques secondes.',
       });
       setTimeout(() => setSaveMessage(null), 5000);
     } catch (err: any) {
@@ -80,32 +70,6 @@ export const WpCommercialSettings: React.FC<WpCommercialSettingsProps> = ({
           Configurez l'identité de la concession, l'adresse à Aix-les-Bains et modifiez librement les coordonnées bancaires (titulaire, IBAN, BIC, RIB, montant d'acompte).
         </p>
       </div>
-
-      {!isFirebaseAdmin && onConnectGoogle && (
-        <div className="mb-6 p-4 bg-amber-50 border border-amber-200 text-amber-900 text-xs rounded-lg space-y-2.5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-              <span>
-                Pour synchroniser vos nouveaux paramètres bancaires en ligne pour tous les clients, connectez le compte Google commun ({ADMIN_EMAIL}).
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={() => onConnectGoogle()}
-              disabled={googleConnectLoading}
-              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded shrink-0 cursor-pointer disabled:opacity-60"
-            >
-              {googleConnectLoading ? 'Connexion...' : 'Connecter Google (Cloud)'}
-            </button>
-          </div>
-          {googleConnectError && (
-            <div className="p-2.5 bg-red-50 border border-red-300 rounded text-xs text-red-800 font-medium">
-              {googleConnectError}
-            </div>
-          )}
-        </div>
-      )}
 
       {errorMessage && (
         <div className="mb-6 p-4 bg-red-50 border border-red-300 text-red-900 text-sm rounded-lg flex items-center justify-between gap-2">

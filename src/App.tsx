@@ -30,7 +30,6 @@ import {
   FirebaseConnectionStatus,
   isAuthorizedAdminUser,
   verifyAdminAuthorization,
-  signInAdminWithGoogle,
   signOutFirebaseAdmin,
   clearVerifiedAdminCache,
 } from './firebase';
@@ -95,17 +94,14 @@ export default function App() {
     return null;
   });
 
-  // Authentication State for Admin Access
-  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(() => {
-    try {
-      return (
-        sessionStorage.getItem('vsp_admin_auth') === 'authenticated' ||
-        localStorage.getItem('vsp_admin_auth') === 'authenticated'
-      );
-    } catch {
-      return false;
-    }
-  });
+  // Authentication State for Admin Access (strictly backed by Firebase Auth)
+  const [authReady, setAuthReady] = useState<boolean>(false);
+  const [isFirebaseAdmin, setIsFirebaseAdmin] = useState<boolean>(() =>
+    isAuthorizedAdminUser(auth.currentUser)
+  );
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(() =>
+    isAuthorizedAdminUser(auth.currentUser)
+  );
 
   // Current Hash routing for secret portal #/login
   const [currentHash, setCurrentHash] = useState<string>(() => {
@@ -143,13 +139,6 @@ export default function App() {
     };
   }, [isAdminAuthenticated]);
 
-  // Firebase verified admin auth state (controls Cloud Firestore write/PII sync)
-  const [isFirebaseAdmin, setIsFirebaseAdmin] = useState<boolean>(() =>
-    isAuthorizedAdminUser(auth.currentUser)
-  );
-  const [googleConnectLoading, setGoogleConnectLoading] = useState(false);
-  const [googleConnectError, setGoogleConnectError] = useState<string | null>(null);
-
   useEffect(() => {
     let cancelled = false;
 
@@ -158,6 +147,12 @@ export default function App() {
         clearVerifiedAdminCache();
         if (!cancelled) {
           setIsFirebaseAdmin(false);
+          setIsAdminAuthenticated(false);
+          setAuthReady(true);
+          try {
+            sessionStorage.removeItem('vsp_admin_auth');
+            localStorage.removeItem('vsp_admin_auth');
+          } catch {}
         }
         return;
       }
@@ -166,15 +161,20 @@ export default function App() {
       if (cancelled) return;
 
       setIsFirebaseAdmin(authorized);
+      setIsAdminAuthenticated(authorized);
+      setAuthReady(true);
       if (authorized) {
-        setGoogleConnectError(null);
-        setIsAdminAuthenticated(true);
         try {
           sessionStorage.setItem('vsp_admin_auth', 'authenticated');
           localStorage.setItem('vsp_admin_auth', 'authenticated');
           if (user.email) {
             localStorage.setItem('vsp_admin_user', user.email);
           }
+        } catch {}
+      } else {
+        try {
+          sessionStorage.removeItem('vsp_admin_auth');
+          localStorage.removeItem('vsp_admin_auth');
         } catch {}
       }
     });
@@ -184,33 +184,6 @@ export default function App() {
       unsubAuth();
     };
   }, []);
-
-  const handleConnectGoogleAdmin = async () => {
-    setGoogleConnectError(null);
-    setGoogleConnectLoading(true);
-    try {
-      await signInAdminWithGoogle();
-      setIsFirebaseAdmin(true);
-      setIsAdminAuthenticated(true);
-      await WordPressFirebaseService.seedInitialDataIfEmpty();
-      await WordPressFirebaseService.syncPendingCommercialSettings();
-      await WordPressFirebaseService.syncLocalVehiclesToFirestore();
-    } catch (err: any) {
-      console.error('Google admin connection error:', err);
-      const code = String(err?.code || '');
-      if (code === 'auth/popup-closed-by-user') {
-        setGoogleConnectError('La fenêtre de connexion Google a été fermée avant la validation.');
-      } else if (code === 'auth/popup-blocked') {
-        setGoogleConnectError('Le navigateur a bloqué la fenêtre Google. Autorisez les pop-ups pour ce site puis réessayez.');
-      } else if (code === 'auth/unauthorized-domain') {
-        setGoogleConnectError('Ce domaine doit être ajouté dans Firebase Authentication > Paramètres > Domaines autorisés.');
-      } else {
-        setGoogleConnectError(err?.message || 'Impossible de connecter le compte Google partagé.');
-      }
-    } finally {
-      setGoogleConnectLoading(false);
-    }
-  };
 
   // Logout handler
   const handleAdminLogout = async () => {
@@ -295,9 +268,6 @@ export default function App() {
       } catch (err: any) {
         if (!cancelled) {
           console.error('Auto Cloud sync error:', err);
-          setGoogleConnectError(
-            err?.message || 'Erreur lors de la synchronisation automatique vers Cloud Firestore.'
-          );
         }
       }
     })();
@@ -436,11 +406,22 @@ export default function App() {
     currentHash === '#login' ||
     (typeof window !== 'undefined' && window.location.hash.toLowerCase().includes('login'));
 
+  // Wait for Firebase Auth session restoration before showing login portal on #/login or #/admin
+  if (!authReady && (isSecretLoginRoute || !isFrontOffice)) {
+    return (
+      <div className="fixed inset-0 z-[9999999] bg-slate-950 text-slate-200 flex flex-col items-center justify-center gap-3">
+        <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+        <span className="text-xs font-medium text-slate-400">Vérification de la session...</span>
+      </div>
+    );
+  }
+
   // 1. If on secret login route and not authenticated: full-screen login portal covering the entire screen
   if (isSecretLoginRoute && !isAdminAuthenticated) {
     return (
       <AdminLoginPortal
         onLoginSuccess={() => {
+          setIsFirebaseAdmin(true);
           setIsAdminAuthenticated(true);
           setIsFrontOffice(false);
           setCurrentHash('#/admin');
@@ -464,6 +445,7 @@ export default function App() {
     return (
       <AdminLoginPortal
         onLoginSuccess={() => {
+          setIsFirebaseAdmin(true);
           setIsAdminAuthenticated(true);
           setIsFrontOffice(false);
           setCurrentHash('#/admin');
@@ -568,8 +550,6 @@ export default function App() {
             connectionStatus={connectionStatus}
             pendingOrdersCount={pendingOrdersCount}
             isFirebaseAdmin={isFirebaseAdmin}
-            googleConnectLoading={googleConnectLoading}
-            onConnectGoogle={handleConnectGoogleAdmin}
             onNavigate={handleNavigate}
             onTestConnection={runConnectionCheck}
             onToggleFrontOffice={() => setIsFrontOffice(true)}
@@ -604,10 +584,6 @@ export default function App() {
                   vehicles={vehicles}
                   orders={orders}
                   commercialSettings={commercialSettings}
-                  isFirebaseAdmin={isFirebaseAdmin}
-                  googleConnectLoading={googleConnectLoading}
-                  googleConnectError={googleConnectError}
-                  onConnectGoogle={handleConnectGoogleAdmin}
                   onNavigate={handleNavigate}
                   onToggleFrontOffice={() => setIsFrontOffice(true)}
                   onOpenNewVehicle={() => {
@@ -624,9 +600,6 @@ export default function App() {
                   brands={brands}
                   connectionStatus={connectionStatus}
                   isFirebaseAdmin={isFirebaseAdmin}
-                  googleConnectLoading={googleConnectLoading}
-                  googleConnectError={googleConnectError}
-                  onConnectGoogle={handleConnectGoogleAdmin}
                   isCreating={isCreatingVehicle || activeMenu === 'vehicles-new'}
                   onCloseCreate={() => setIsCreatingVehicle(false)}
                   onVehiclesUpdated={(newVehs) => setVehicles(newVehs)}
@@ -659,10 +632,6 @@ export default function App() {
               {activeMenu === 'commercial-settings' && (
                 <WpCommercialSettings
                   settings={commercialSettings}
-                  isFirebaseAdmin={isFirebaseAdmin}
-                  googleConnectLoading={googleConnectLoading}
-                  googleConnectError={googleConnectError}
-                  onConnectGoogle={handleConnectGoogleAdmin}
                 />
               )}
 

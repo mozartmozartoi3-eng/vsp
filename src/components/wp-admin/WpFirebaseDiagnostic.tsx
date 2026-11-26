@@ -55,7 +55,7 @@ export const WpFirebaseDiagnostic: React.FC<WpFirebaseDiagnosticProps> = ({
       if (ok) {
         setSeedSuccess('Collections et véhicules synchronisés avec votre base Cloud Firestore !');
       } else {
-        setSeedError("Connectez-vous d'abord avec votre compte Google administrateur pour synchroniser en écriture.");
+        setSeedError("Connectez-vous d'abord avec l'accès administrateur pour synchroniser en écriture.");
       }
       setTimeout(() => setSeedSuccess(null), 5000);
     } catch (e: any) {
@@ -71,7 +71,8 @@ service cloud.firestore {
   match /databases/{database}/documents {
     function isAdmin() {
       return request.auth != null
-        && request.auth.token.email == "mozartmozartoi3@gmail.com"
+        && (request.auth.token.email.lower() == "amautosanspermis@gmail.com"
+          || request.auth.token.email.lower() == "mozartmozartoi3@gmail.com")
         && request.auth.token.email_verified == true;
     }
 
@@ -166,7 +167,7 @@ service cloud.firestore {
             <div className="font-mono font-bold text-gray-900 truncate mt-1">{firebaseConfig.projectId}</div>
           </div>
           <div className="p-3 bg-gray-50 border border-gray-200 rounded text-center">
-            <div className="text-gray-500 text-[11px]">Session Google Admin</div>
+            <div className="text-gray-500 text-[11px]">Session Admin</div>
             <div className={`font-bold text-xs mt-1 truncate ${adminAuthorized ? 'text-emerald-700' : 'text-amber-700'}`}>
               {adminAuthorized ? currentUser?.email : 'Non connecté (lecture seule)'}
             </div>

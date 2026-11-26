@@ -43,10 +43,13 @@ service cloud.firestore {
         && request.auth.token.email.size() >= 3;
     }
 
-    // Administrateur vérifié (compte commun mozartmozartoi3@gmail.com ou UID dans /admins/{uid})
+    // Administrateur vérifié (accès commun amautosanspermis@gmail.com / mozartmozartoi3@gmail.com ou UID dans /admins/{uid})
     function isAdmin() {
       return isVerifiedUser() && (
-        (hasVerifiedEmail() && request.auth.token.email.lower() == 'mozartmozartoi3@gmail.com')
+        (hasVerifiedEmail() && (
+          request.auth.token.email.lower() == 'amautosanspermis@gmail.com'
+          || request.auth.token.email.lower() == 'mozartmozartoi3@gmail.com'
+        ))
         || exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
     }

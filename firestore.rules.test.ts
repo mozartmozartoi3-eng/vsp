@@ -28,7 +28,7 @@ interface DirtyPayloadCase {
   expectedResult: 'PERMISSION_DENIED';
 }
 
-const ADMIN_EMAIL = 'mozartmozartoi3@gmail.com';
+const ADMIN_EMAIL = 'amautosanspermis@gmail.com';
 const SERVER_TIME_MARKER = '__SERVER_TIMESTAMP__';
 
 export const dirtyDozenPayloads: DirtyPayloadCase[] = [

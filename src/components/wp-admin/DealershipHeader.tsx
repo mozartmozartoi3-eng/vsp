@@ -18,8 +18,6 @@ interface DealershipHeaderProps {
   connectionStatus: FirebaseConnectionStatus;
   pendingOrdersCount: number;
   isFirebaseAdmin?: boolean;
-  googleConnectLoading?: boolean;
-  onConnectGoogle?: () => Promise<void> | void;
   onNavigate: (key: AdminMenuKey) => void;
   onTestConnection: () => void;
   onToggleFrontOffice: () => void;
@@ -34,8 +32,6 @@ export const DealershipHeader: React.FC<DealershipHeaderProps> = ({
   connectionStatus,
   pendingOrdersCount,
   isFirebaseAdmin = false,
-  googleConnectLoading = false,
-  onConnectGoogle,
   onNavigate,
   onTestConnection,
   onToggleFrontOffice,
@@ -75,30 +71,21 @@ export const DealershipHeader: React.FC<DealershipHeaderProps> = ({
           <>
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
             <span className="text-slate-200 text-[11px] font-medium">
-              Cloud Firestore synchronisé
+              Cloud synchronisé en temps réel
             </span>
           </>
         ) : connectionStatus.connected ? (
           <>
             <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
             <span className="text-slate-300 text-[11px]">
-              Session locale
+              Synchronisation en cours...
             </span>
-            {onConnectGoogle && (
-              <button
-                onClick={() => onConnectGoogle()}
-                disabled={googleConnectLoading}
-                className="ml-1 px-2.5 py-0.5 bg-blue-600 hover:bg-blue-500 text-white rounded text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-60"
-              >
-                {googleConnectLoading ? 'Connexion...' : 'Synchroniser Cloud (Google)'}
-              </button>
-            )}
           </>
         ) : connectionStatus.testing ? (
           <span className="text-slate-300 text-[11px]">Connexion base de données...</span>
         ) : (
           <>
-            <span className="text-slate-300 text-[11px]">Mode serveur actif</span>
+            <span className="text-slate-300 text-[11px]">Hors ligne</span>
             <button
               onClick={onTestConnection}
               className="text-blue-400 hover:underline text-[11px] ml-1 flex items-center gap-1 cursor-pointer"
